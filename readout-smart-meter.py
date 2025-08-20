@@ -35,7 +35,7 @@ FRAME2_END_BYTE = b"\x16"
 # AES key format, e.g. 48E2C...
 VNB_KEY = "<YOUR_KEY>"
 
-LOG_FILE = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__), os.path.basename(__file__)[:-2]+"log"))
+LOG_FILE = os.path.realpath(os.path.join(os.path.dirname(__file__), os.path.basename(__file__)[:-2]+"log"))
 # LOG_FILE = ""  # if you don't want to log
 PRINT_LOGS = True
 

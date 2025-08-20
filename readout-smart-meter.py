@@ -120,6 +120,8 @@ translator.comments = True
 #translator.completePdu = True
 translator.hex = False  # Shows numeric values as int instead of hex -> <UInt16 Value="2319" /> instead of <UInt16 Value="090F" />
 
+aesgcm = AESGCM(unhexlify(VNB_KEY))
+
 ser = serial.Serial(
     port=COM_PORT,
     baudrate=BAUDRATE,
@@ -128,6 +130,9 @@ ser = serial.Serial(
     bytesize=BYTESIZE,
     timeout=TIMEOUT
 )
+
+payload1StartPos = 27
+payload2StartPos = 9
 
 lastError = 0
 errorCount = 0
@@ -157,9 +162,6 @@ while not signalHandler.shutdown_requested():
         frameCounter = data[23:27]  # --- 4 bytes
         initVector = systemTitle + frameCounter  # --- 12 bytes
 
-        payload1StartPos = 27
-        payload2StartPos = 9
-
         frameLength1 = int(hex(data[1]), 16)  # FA --- 250 bytes
         frameLength2 = int(hex(data[frameLength1 + 7]), 16) # FA --- 38 Byte
 
@@ -167,8 +169,6 @@ while not signalHandler.shutdown_requested():
         payload2 = data[6 + frameLength1 + payload2StartPos:(frameLength1 + 5 + 5 + frameLength2)]
 
         cypherText = payload1 + payload2
-
-        aesgcm = AESGCM(unhexlify(VNB_KEY))
         apdu = aesgcm.encrypt(initVector, cypherText, b"0").hex()
 
         xml = translator.pduToXml(apdu)

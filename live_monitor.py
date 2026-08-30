@@ -63,14 +63,14 @@ class LivePowerMonitor:
         """Configure the plot axes."""
         # Net Power Plot (top)
         self.ax1.set_ylabel('Net Power (W)', fontsize=11)
-        self.ax1.legend(loc='upper left')
+        # Legend will be set when data is plotted
         self.ax1.grid(True, alpha=0.3)
         self.ax1.axhline(y=0, color='gray', linestyle='--', linewidth=0.8, alpha=0.7)
         
         # Power In/Out Plot (bottom)
         self.ax2.set_xlabel('Time', fontsize=11)
         self.ax2.set_ylabel('Power (W)', fontsize=11)
-        self.ax2.legend(loc='upper left')
+        # Legend will be set when data is plotted
         self.ax2.grid(True, alpha=0.3)
         
     def read_data(self):
@@ -142,6 +142,12 @@ class LivePowerMonitor:
         self.ax1.autoscale_view()
         self.ax2.relim()
         self.ax2.autoscale_view()
+        
+        # Add legends (only if not already present)
+        if not self.ax1.get_legend():
+            self.ax1.legend(loc='upper left')
+        if not self.ax2.get_legend():
+            self.ax2.legend(loc='upper left')
         
         # Format x-axis to show time
         date_format = DateFormatter('%H:%M:%S')

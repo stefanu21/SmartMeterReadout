@@ -111,8 +111,23 @@ class LivePowerMonitor:
                 x_val = xdata[index]
                 y_val = ydata[index]
                 
-                # Format the time
-                time_str = mdates.num2date(x_val).strftime('%H:%M:%S')
+                # Format the time - check if x_val is already a datetime or a matplotlib date number
+                try:
+                    # If it's a matplotlib date number (float)
+                    if isinstance(x_val, (int, float, np.floating, np.integer)):
+                        time_obj = mdates.num2date(x_val)
+                    # If it's already a numpy datetime64 or pandas Timestamp
+                    elif hasattr(x_val, 'strftime'):
+                        time_obj = x_val
+                    else:
+                        # Convert numpy datetime64 to pandas Timestamp for strftime
+                        import pandas as pd
+                        time_obj = pd.Timestamp(x_val)
+                    
+                    time_str = time_obj.strftime('%H:%M:%S')
+                except Exception as e:
+                    # Fallback - just show the value
+                    time_str = str(x_val)
                 
                 # Set the annotation text with actual measured value
                 sel.annotation.set_text(f'{time_str}\n{y_val:.1f} W')

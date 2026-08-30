@@ -374,13 +374,24 @@ def plot_power_overview_interactive(df, hours=24):
     
     # Add interactive cursor if mplcursors is available
     if HAS_MPLCURSORS:
-        cursor = mplcursors.cursor(line_net + line_in + line_out, hover=True)
+        # Use hover=2 to snap to actual data points only (not interpolated values)
+        cursor = mplcursors.cursor(line_net + line_in + line_out, hover=mplcursors.HoverMode.Transient)
         @cursor.connect("add")
         def on_add(sel):
-            # Get the data point
-            x, y = sel.target
-            time_str = mdates.num2date(x).strftime('%H:%M:%S')
-            sel.annotation.set_text(f'{time_str}\n{y:.1f} W')
+            # sel.index gives us the index of the actual data point
+            index = sel.index
+            line = sel.artist
+            
+            # Get the actual data point from the line
+            xdata, ydata = line.get_data()
+            x_val = xdata[index]
+            y_val = ydata[index]
+            
+            # Format the time
+            time_str = mdates.num2date(x_val).strftime('%H:%M:%S')
+            
+            # Set the annotation text with actual measured value
+            sel.annotation.set_text(f'{time_str}\n{y_val:.1f} W')
             sel.annotation.get_bbox_patch().set(fc="white", alpha=0.9)
     else:
         print("Info: Install 'mplcursors' for interactive hover tooltips: pip install mplcursors")

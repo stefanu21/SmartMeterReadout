@@ -74,13 +74,25 @@ class LivePowerMonitor:
         # Add interactive cursor for power lines if mplcursors is available
         self.cursor = None
         if HAS_MPLCURSORS:
-            self.cursor = mplcursors.cursor([self.line_net, self.line_in, self.line_out], hover=True)
+            # Use HoverMode.Transient to snap to actual data points only
+            self.cursor = mplcursors.cursor([self.line_net, self.line_in, self.line_out], 
+                                           hover=mplcursors.HoverMode.Transient)
             @self.cursor.connect("add")
             def on_add(sel):
-                # Get the data point
-                x, y = sel.target
-                time_str = mdates.num2date(x).strftime('%H:%M:%S')
-                sel.annotation.set_text(f'{time_str}\n{y:.1f} W')
+                # sel.index gives us the index of the actual data point
+                index = sel.index
+                line = sel.artist
+                
+                # Get the actual data point from the line
+                xdata, ydata = line.get_data()
+                x_val = xdata[index]
+                y_val = ydata[index]
+                
+                # Format the time
+                time_str = mdates.num2date(x_val).strftime('%H:%M:%S')
+                
+                # Set the annotation text with actual measured value
+                sel.annotation.set_text(f'{time_str}\n{y_val:.1f} W')
                 sel.annotation.get_bbox_patch().set(fc="white", alpha=0.9)
             print("Info: Interactive cursor enabled (hover over power curves to see values)")
         else:

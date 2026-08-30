@@ -45,6 +45,8 @@ python3 demo_gui.py
 ```
 --gui              Startet Live-GUI automatisch
 --gui-hours N      Zeigt letzte N Stunden im GUI (Standard: 1)
+--log-interval N   Logge jede N-te Messung (Standard: 1)
+--clear-data       Löscht alte Daten und startet neu (erstellt Backup)
 --key KEY          AES-Schlüssel für Entschlüsselung
 --port PORT        Serieller Port (Standard: /dev/ttyUSB0)
 ```
@@ -69,10 +71,16 @@ Das Live-GUI zeigt:
 ## Beispiele
 
 ```bash
+# Neu starten (alte Daten löschen)
+python3 readout-smart-meter.py --clear-data --gui
+
 # Zeige letzte 30 Minuten
 python3 readout-smart-meter.py --gui --gui-hours 0.5
 
-# Zeige letzte 6 Stunden
+# Logge nur jede Minute mit GUI
+python3 readout-smart-meter.py --gui --log-interval 12
+
+# Zeige letzte 6 Stunden (separat)
 python3 live_monitor.py --hours 6
 
 # Schnellere Updates (alle 2 Sekunden)

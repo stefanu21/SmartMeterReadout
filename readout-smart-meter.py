@@ -156,7 +156,25 @@ parser.add_argument('--gui-hours', type=float, default=1, help='Hours to display
 parser.add_argument('--log-interval', type=int, default=LOGGING_INTERVAL, 
                    help=f'Log every N-th measurement (default: {LOGGING_INTERVAL}). '
                         f'Smart meter sends ~every 5 sec. Examples: 1=5sec, 12=1min, 60=5min')
+parser.add_argument('--clear-data', action='store_true',
+                   help='Delete old data and start fresh (creates backup as power_data.csv.backup)')
 args = parser.parse_args()
+
+# Handle --clear-data option
+if args.clear_data:
+    if os.path.exists(DATA_FILE):
+        backup_file = DATA_FILE + '.backup'
+        log(f"Creating backup of old data: {backup_file}")
+        try:
+            import shutil
+            shutil.copy2(DATA_FILE, backup_file)
+            os.remove(DATA_FILE)
+            log(f"Old data removed. Starting fresh. Backup saved to: {backup_file}")
+        except Exception as e:
+            log(f"Error handling --clear-data: {str(e)}", True)
+            sys.exit(1)
+    else:
+        log("No existing data file found. Starting fresh.")
 
 # Override configuration from command line
 if args.key:

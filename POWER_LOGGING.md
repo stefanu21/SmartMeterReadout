@@ -38,6 +38,26 @@ Das Skript liest alle ~5 Sekunden die Daten vom Smart Meter und schreibt sie in 
 
 **Beim Neustart**: Die Datei wird nicht überschrieben - neue Daten werden automatisch angehängt. Sie können das Programm beliebig oft stoppen und neu starten, ohne Daten zu verlieren.
 
+#### Von vorne beginnen (alte Daten löschen)
+
+Wenn Sie alte Daten entfernen und neu starten möchten:
+
+```bash
+# Löscht alte Daten und beginnt von vorne (erstellt Backup)
+python3 readout-smart-meter.py --clear-data
+```
+
+Dies erstellt automatisch ein Backup als `power_data.csv.backup` bevor die alten Daten gelöscht werden.
+
+**Oder manuell:**
+```bash
+# Backup erstellen
+mv power_data.csv power_data_backup.csv
+
+# Neu starten (neue Datei wird automatisch erstellt)
+python3 readout-smart-meter.py
+```
+
 #### Abtastrate anpassen
 
 Standardmäßig wird jede Messung (~alle 5 Sekunden) geloggt. Sie können dies mit `--log-interval` anpassen:

@@ -158,6 +158,14 @@ parser.add_argument('--key', type=str, help='AES decryption key (VNB_KEY) in hex
 parser.add_argument('--port', type=str, default=COM_PORT, help=f'Serial port (default: {COM_PORT})')
 parser.add_argument('--gui', action='store_true', help='Start live GUI monitor in a separate window')
 parser.add_argument('--gui-hours', type=float, default=1, help='Hours to display in GUI (default: 1)')
+parser.add_argument('--tasmota', action='store_true',
+                   help='Start Tasmota smart-plug monitor in the background (see tasmota_monitor.py)')
+parser.add_argument('--tasmota-devices', type=str,
+                   help='Comma-separated Name=IP list of Tasmota devices to poll, '
+                        'e.g. "Kueche=192.168.100.3,Keller=192.168.100.4" '
+                        '(default: built-in config in tasmota_monitor.py)')
+parser.add_argument('--tasmota-interval', type=float, default=5,
+                   help='Seconds between Tasmota poll cycles (default: 5)')
 parser.add_argument('--log-interval', type=int, default=LOGGING_INTERVAL, 
                    help=f'Log every N-th measurement (default: {LOGGING_INTERVAL}). '
                         f'Smart meter sends ~every 5 sec. Examples: 1=5sec, 12=1min, 60=5min')
@@ -221,13 +229,39 @@ if args.gui:
                     sys.executable, 
                     gui_script,
                     '--hours', str(args.gui_hours),
-                    '--file', DATA_FILE
+                    '--file', DATA_FILE,
+                    '--tasmota-file', os.path.join(script_dir, "tasmota_power.csv"),
                 ])
                 log(f"GUI monitor started with PID {gui_process.pid}")
             else:
                 log(f"Warning: GUI script not found at {gui_script}", True)
         except Exception as e:
             log(f"Failed to start GUI monitor: {str(e)}", True)
+
+# Start Tasmota smart-plug monitor if requested
+tasmota_process = None
+if args.tasmota:
+    try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        tasmota_script = os.path.join(script_dir, "tasmota_monitor.py")
+
+        if os.path.exists(tasmota_script):
+            tasmota_data_file = os.path.join(script_dir, "tasmota_power.csv")
+            tasmota_cmd = [
+                sys.executable,
+                tasmota_script,
+                '--interval', str(args.tasmota_interval),
+                '--file', tasmota_data_file,
+            ]
+            if args.tasmota_devices:
+                tasmota_cmd += ['--devices', args.tasmota_devices]
+            log("Starting Tasmota smart-plug monitor...")
+            tasmota_process = subprocess.Popen(tasmota_cmd)
+            log(f"Tasmota monitor started with PID {tasmota_process.pid}")
+        else:
+            log(f"Warning: Tasmota monitor script not found at {tasmota_script}", True)
+    except Exception as e:
+        log(f"Failed to start Tasmota monitor: {str(e)}", True)
 
 signalHandler = SignalHandler()
 
@@ -432,5 +466,22 @@ if gui_process is not None:
             log(f"Error stopping GUI monitor: {str(e)}", True)
             try:
                 gui_process.kill()
+            except:
+                pass
+
+# Cleanup Tasmota monitor process if it was started
+if tasmota_process is not None:
+    if tasmota_process.poll() is not None:
+        log("Tasmota monitor already stopped")
+    else:
+        try:
+            log("Stopping Tasmota monitor...")
+            tasmota_process.terminate()
+            tasmota_process.wait(timeout=5)
+            log("Tasmota monitor stopped")
+        except Exception as e:
+            log(f"Error stopping Tasmota monitor: {str(e)}", True)
+            try:
+                tasmota_process.kill()
             except:
                 pass

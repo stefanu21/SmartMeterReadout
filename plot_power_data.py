@@ -22,7 +22,49 @@ except ImportError:
 
 # Configuration
 DATA_FILE = "power_data.csv"
+TASMOTA_DATA_FILE = "tasmota_power.csv"
 OUTPUT_DIR = "plots"
+
+# Colors used for Tasmota smart-plug lines, distinct from the smart meter's
+# blue (net) / red (in) / green (out).
+TASMOTA_COLOR_PALETTE = [
+    'purple', 'orange', 'brown', 'magenta', 'cyan', 'olive', 'darkgoldenrod', 'teal',
+]
+
+def load_tasmota_data(filepath, hours=24):
+    """Load Tasmota smart-plug data (long format CSV: one row per device per
+    poll cycle) and pivot it into a wide DataFrame (datetime index, one
+    column per device holding its power in Watts). Returns None if the file
+    doesn't exist or has no usable data."""
+    if not filepath or not os.path.exists(filepath):
+        return None
+
+    try:
+        df = pd.read_csv(filepath, on_bad_lines='skip')
+        if df.empty or 'device' not in df.columns or 'power' not in df.columns:
+            return None
+
+        df['datetime'] = pd.to_datetime(df['datetime'], errors='coerce')
+        df['power'] = pd.to_numeric(df['power'], errors='coerce')
+        df = df.dropna(subset=['datetime', 'power'])
+        if df.empty:
+            return None
+
+        latest_time = df['datetime'].max()
+        cutoff_time = latest_time - timedelta(hours=hours)
+        df = df[df['datetime'] >= cutoff_time]
+        if df.empty:
+            return None
+
+        return df.pivot_table(index='datetime', columns='device', values='power', aggfunc='last')
+    except Exception as e:
+        print(f"Warning: Could not load Tasmota data: {e}")
+        return None
+
+def _tasmota_color_map(devices):
+    """Assign a stable color to each device name from the palette."""
+    return {device: TASMOTA_COLOR_PALETTE[i % len(TASMOTA_COLOR_PALETTE)]
+            for i, device in enumerate(devices)}
 
 def clamp_ylim_nonnegative(ax, values):
     """After autoscale, raise the y-axis lower limit to 0 if none of the
@@ -130,7 +172,7 @@ def load_data(filepath):
             print("You may need to regenerate the data file.")
             sys.exit(1)
 
-def plot_power_overview(df, hours=24):
+def plot_power_overview(df, hours=24, tasmota_file=None):
     """Plot RealPower (net), RealPowerIn and RealPowerOut in one graph."""
     if df.empty:
         print(f"No data available.")
@@ -156,6 +198,16 @@ def plot_power_overview(df, hours=24):
     ax.plot(df_filtered['datetime'], df_filtered['real_power_out'], 
             label='RealPowerOut (Feed-in)', linewidth=1.5, color='green', alpha=0.7)
     
+    # Plot Tasmota smart-plug devices, if available
+    tasmota_df = load_tasmota_data(tasmota_file, hours=hours)
+    clamp_values = [df_filtered['real_power_net'], df_filtered['real_power_in'], df_filtered['real_power_out']]
+    if tasmota_df is not None:
+        colors = _tasmota_color_map(tasmota_df.columns)
+        for device in tasmota_df.columns:
+            ax.plot(tasmota_df.index, tasmota_df[device],
+                    label=str(device), linewidth=1.5, color=colors[device])
+            clamp_values.append(tasmota_df[device].dropna())
+    
     ax.axhline(y=0, color='gray', linestyle='--', linewidth=0.8, alpha=0.7)
     
     ax.set_xlabel('Time', fontsize=12)
@@ -163,9 +215,7 @@ def plot_power_overview(df, hours=24):
     ax.set_title(f'Power Overview - Last {hours} Hours', fontsize=14, fontweight='bold')
     ax.legend(loc='upper left', fontsize=11)
     ax.grid(True, alpha=0.3)
-    clamp_ylim_nonnegative(ax, [df_filtered['real_power_net'],
-                                df_filtered['real_power_in'],
-                                df_filtered['real_power_out']])
+    clamp_ylim_nonnegative(ax, clamp_values)
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
     if hours <= 2:
         ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=15))
@@ -490,7 +540,7 @@ class PlotNavigator:
         self.fig.canvas.draw_idle()
 
 
-def plot_power_overview_interactive(df, hours=24):
+def plot_power_overview_interactive(df, hours=24, tasmota_file=None):
     """Interactive version of power overview plot."""
     if df.empty:
         print(f"No data available.")
@@ -513,15 +563,24 @@ def plot_power_overview_interactive(df, hours=24):
     line_out = ax.plot(df_filtered['datetime'], df_filtered['real_power_out'], 
                        label='RealPowerOut (Feed-in)', linewidth=1.5, color='green', alpha=0.7)
     
+    # Plot Tasmota smart-plug devices, if available
+    tasmota_df = load_tasmota_data(tasmota_file, hours=hours)
+    tasmota_lines = []
+    clamp_values = [df_filtered['real_power_net'], df_filtered['real_power_in'], df_filtered['real_power_out']]
+    if tasmota_df is not None:
+        colors = _tasmota_color_map(tasmota_df.columns)
+        for device in tasmota_df.columns:
+            tasmota_lines += ax.plot(tasmota_df.index, tasmota_df[device],
+                                      label=str(device), linewidth=1.5, color=colors[device])
+            clamp_values.append(tasmota_df[device].dropna())
+    
     ax.axhline(y=0, color='gray', linestyle='--', linewidth=0.8, alpha=0.7)
     ax.set_xlabel('Time', fontsize=12)
     ax.set_ylabel('Power (W)', fontsize=12)
     ax.set_title(f'Power Overview - Last {hours} Hours (INTERACTIVE)', fontsize=14, fontweight='bold')
     ax.legend(loc='upper left', fontsize=11)
     ax.grid(True, alpha=0.3)
-    clamp_ylim_nonnegative(ax, [df_filtered['real_power_net'],
-                                df_filtered['real_power_in'],
-                                df_filtered['real_power_out']])
+    clamp_ylim_nonnegative(ax, clamp_values)
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
     plt.xticks(rotation=45)
     plt.tight_layout()
@@ -533,7 +592,7 @@ def plot_power_overview_interactive(df, hours=24):
     if HAS_MPLCURSORS:
         # Use hover=2 (Transient) to snap to nearest data point
         # This shows tooltips when hovering near the line and snaps to actual measurements
-        cursor = mplcursors.cursor(line_net + line_in + line_out, hover=2)
+        cursor = mplcursors.cursor(line_net + line_in + line_out + tasmota_lines, hover=2)
         
         @cursor.connect("add")
         def on_add(sel):
@@ -586,7 +645,9 @@ def plot_power_overview_interactive(df, hours=24):
                 time_str = str(x_val)
             
             # Set the annotation text with actual measured value
-            sel.annotation.set_text(f'{time_str}\n{y_val:.1f} W')
+            label = line.get_label()
+            prefix = f'{label}\n' if label and not label.startswith('_') else ''
+            sel.annotation.set_text(f'{prefix}{time_str}\n{y_val:.1f} W')
             sel.annotation.get_bbox_patch().set(fc="white", alpha=0.9)
             sel.annotation.arrow_patch.set(arrowstyle='->', lw=1.5)
         
@@ -673,6 +734,9 @@ def main():
                        help='Number of hours to plot (default: 24)')
     parser.add_argument('--file', type=str, default=DATA_FILE,
                        help=f'Path to CSV data file (default: {DATA_FILE})')
+    parser.add_argument('--tasmota-file', type=str, default=TASMOTA_DATA_FILE,
+                       help=f'Path to Tasmota smart-plug CSV file (default: {TASMOTA_DATA_FILE}). '
+                            f'Ignored if the file does not exist.')
     parser.add_argument('--interactive', '-i', action='store_true',
                        help='Show interactive plot instead of saving to file (allows zoom/pan)')
     args = parser.parse_args()
@@ -683,6 +747,7 @@ def main():
     # Load data
     script_dir = os.path.dirname(os.path.abspath(__file__))
     data_file = os.path.join(script_dir, args.file)
+    tasmota_file = os.path.join(script_dir, args.tasmota_file)
     
     print(f"Loading data from: {data_file}")
     df = load_data(data_file)
@@ -708,13 +773,13 @@ def main():
         print("  r key          - Reset to original view")
         print()
         # Show interactive plots (don't close, don't save)
-        plot_power_overview_interactive(df, hours=args.hours)
+        plot_power_overview_interactive(df, hours=args.hours, tasmota_file=tasmota_file)
         plot_energy_overview_interactive(df, hours=args.hours)
     else:
         print("\nGenerating plots...")
     
     # Plot 1: Power overview (Net, In, Out)
-    plot_power_overview(df, hours=args.hours)
+    plot_power_overview(df, hours=args.hours, tasmota_file=tasmota_file)
     
     # Plot 2: Energy overview (In, Out)
     plot_energy_overview(df, hours=args.hours)

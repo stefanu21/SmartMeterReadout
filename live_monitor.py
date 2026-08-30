@@ -9,6 +9,7 @@ import matplotlib
 import os
 import sys
 import time
+import itertools
 
 # Try different backends in order of preference
 # We need to set backend before importing pyplot
@@ -45,13 +46,21 @@ except ImportError:
 
 # Configuration
 DATA_FILE = "power_data.csv"
+TASMOTA_DATA_FILE = "tasmota_power.csv"
 UPDATE_INTERVAL = 5000  # Update every 5 seconds (in milliseconds)
 DISPLAY_HOURS = 1  # Show last N hours of data
 MAX_HISTORY_HOURS = 48  # Max hours of data to keep plotted (for scrolling back)
 
+# Colors used for dynamically-added Tasmota smart-plug lines. Chosen to be
+# distinct from the smart meter's blue (net) / red (in) / green (out).
+TASMOTA_COLOR_PALETTE = [
+    'purple', 'orange', 'brown', 'magenta', 'cyan', 'olive', 'darkgoldenrod', 'teal',
+]
+
 class LivePowerMonitor:
-    def __init__(self, data_file, display_hours=1):
+    def __init__(self, data_file, display_hours=1, tasmota_file=None):
         self.data_file = data_file
+        self.tasmota_file = tasmota_file
         self.display_hours = display_hours
         
         # Create figure and subplots
@@ -66,6 +75,12 @@ class LivePowerMonitor:
         # Energy bars will be created in update_plot
         self.energy_bars_in = None
         self.energy_bars_out = None
+        
+        # Dynamically-created lines for Tasmota smart-plug devices, keyed by
+        # device name. Populated lazily as devices are first seen in the CSV.
+        self.tasmota_lines = {}
+        self._tasmota_color_map = {}
+        self._tasmota_color_cycle = itertools.cycle(TASMOTA_COLOR_PALETTE)
         
         # Flag: True once the user manually zooms/scrolls, so auto-scaling stops
         self.user_adjusted_view = False
@@ -88,69 +103,84 @@ class LivePowerMonitor:
         # Add interactive cursor for power lines if mplcursors is available
         self.cursor = None
         if HAS_MPLCURSORS:
-            # Use hover=2 (Transient) to snap to nearest data point
-            # This shows tooltips when hovering near the line and snaps to actual measurements
-            self.cursor = mplcursors.cursor([self.line_net, self.line_in, self.line_out], hover=2)
-            
-            @self.cursor.connect("add")
-            def on_add(sel):
-                # Get the line data and target point
-                line = sel.artist
-                xdata, ydata = line.get_data()
-                
-                # Convert to numpy arrays if they're pandas Series
-                if hasattr(xdata, 'values'):
-                    xdata = xdata.values
-                if hasattr(ydata, 'values'):
-                    ydata = ydata.values
-                
-                # sel.target contains the (x, y) coordinates
-                x_target, y_target = sel.target
-                
-                # Find the nearest actual data point
-                if hasattr(sel, 'index') and sel.index is not None:
-                    # If index is available, use it
-                    index = int(sel.index) if not isinstance(sel.index, int) else sel.index
-                else:
-                    # Find nearest point manually
-                    distances = np.abs(xdata - x_target)
-                    index = np.argmin(distances)
-                
-                # Make sure index is valid
-                if index >= len(xdata):
-                    index = len(xdata) - 1
-                
-                # Get the actual data point
-                x_val = xdata[index]
-                y_val = ydata[index]
-                
-                # Format the time - check if x_val is already a datetime or a matplotlib date number
-                try:
-                    # If it's a matplotlib date number (float)
-                    if isinstance(x_val, (int, float, np.floating, np.integer)):
-                        time_obj = mdates.num2date(x_val)
-                    # If it's already a numpy datetime64 or pandas Timestamp
-                    elif hasattr(x_val, 'strftime'):
-                        time_obj = x_val
-                    else:
-                        # Convert numpy datetime64 to pandas Timestamp for strftime
-                        import pandas as pd
-                        time_obj = pd.Timestamp(x_val)
-                    
-                    time_str = time_obj.strftime('%H:%M:%S')
-                except Exception as e:
-                    # Fallback - just show the value
-                    time_str = str(x_val)
-                
-                # Set the annotation text with actual measured value
-                sel.annotation.set_text(f'{time_str}\n{y_val:.1f} W')
-                sel.annotation.get_bbox_patch().set(fc="white", alpha=0.9)
-                sel.annotation.arrow_patch.set(arrowstyle='->', lw=1.5)
-            
+            self._rebuild_cursor()
             print("Info: Interactive cursor enabled - hover over power curves to see values")
         else:
             print("Info: Install 'mplcursors' for interactive hover tooltips: pip install mplcursors")
-        
+
+    def _on_cursor_add(self, sel):
+        """mplcursors 'add' callback: show time + actual measured value."""
+        # Get the line data and target point
+        line = sel.artist
+        xdata, ydata = line.get_data()
+
+        # Convert to numpy arrays if they're pandas Series
+        if hasattr(xdata, 'values'):
+            xdata = xdata.values
+        if hasattr(ydata, 'values'):
+            ydata = ydata.values
+
+        # sel.target contains the (x, y) coordinates
+        x_target, y_target = sel.target
+
+        # Find the nearest actual data point
+        if hasattr(sel, 'index') and sel.index is not None:
+            # If index is available, use it
+            index = int(sel.index) if not isinstance(sel.index, int) else sel.index
+        else:
+            # Find nearest point manually
+            distances = np.abs(xdata - x_target)
+            index = np.argmin(distances)
+
+        # Make sure index is valid
+        if index >= len(xdata):
+            index = len(xdata) - 1
+
+        # Get the actual data point
+        x_val = xdata[index]
+        y_val = ydata[index]
+
+        # Format the time - check if x_val is already a datetime or a matplotlib date number
+        try:
+            # If it's a matplotlib date number (float)
+            if isinstance(x_val, (int, float, np.floating, np.integer)):
+                time_obj = mdates.num2date(x_val)
+            # If it's already a numpy datetime64 or pandas Timestamp
+            elif hasattr(x_val, 'strftime'):
+                time_obj = x_val
+            else:
+                # Convert numpy datetime64 to pandas Timestamp for strftime
+                time_obj = pd.Timestamp(x_val)
+
+            time_str = time_obj.strftime('%H:%M:%S')
+        except Exception:
+            # Fallback - just show the value
+            time_str = str(x_val)
+
+        # Include the line's label (device name) so multiple curves are distinguishable
+        label = line.get_label()
+        prefix = f'{label}\n' if label and not label.startswith('_') else ''
+
+        # Set the annotation text with actual measured value
+        sel.annotation.set_text(f'{prefix}{time_str}\n{y_val:.1f} W')
+        sel.annotation.get_bbox_patch().set(fc="white", alpha=0.9)
+        sel.annotation.arrow_patch.set(arrowstyle='->', lw=1.5)
+
+    def _rebuild_cursor(self):
+        """(Re)create the mplcursors cursor over all current power lines
+        (smart meter net/in/out + any Tasmota device lines). Needed whenever
+        the set of Tasmota lines changes, since mplcursors tracks a fixed
+        artist list at creation time."""
+        if not HAS_MPLCURSORS:
+            return
+        if self.cursor is not None:
+            try:
+                self.cursor.remove()
+            except Exception:
+                pass
+        artists = [self.line_net, self.line_in, self.line_out] + list(self.tasmota_lines.values())
+        self.cursor = mplcursors.cursor(artists, hover=2)
+        self.cursor.connect("add", self._on_cursor_add)
     def setup_axes(self):
         """Configure the plot axes."""
         # Power Overview Plot (top) - All 3 power values
@@ -218,6 +248,58 @@ class LivePowerMonitor:
             traceback.print_exc()
             return None
     
+    def read_tasmota_data(self):
+        """Read Tasmota smart-plug data (long format CSV: one row per device
+        per poll cycle). Returns a DataFrame with columns datetime/device/power,
+        or None if the file doesn't exist / has no usable data."""
+        if not self.tasmota_file or not os.path.exists(self.tasmota_file):
+            return None
+
+        try:
+            df = pd.read_csv(self.tasmota_file, on_bad_lines='skip')
+            if df.empty or 'device' not in df.columns or 'power' not in df.columns:
+                return None
+
+            df['datetime'] = pd.to_datetime(df['datetime'], errors='coerce')
+            df['power'] = pd.to_numeric(df['power'], errors='coerce')
+            df = df.dropna(subset=['datetime', 'power'])
+            if df.empty:
+                return None
+
+            latest_time = df['datetime'].max()
+            history_cutoff = latest_time - timedelta(hours=MAX_HISTORY_HOURS)
+            df = df[df['datetime'] >= history_cutoff]
+
+            return df
+        except Exception as e:
+            print(f"Error reading Tasmota data: {e}")
+            return None
+
+    def _update_tasmota_lines(self, view_start=None):
+        """Load the latest Tasmota data and update (or create) one line per
+        device on ax1. Returns True if the set of known devices changed
+        (i.e. legend/cursor need to be rebuilt)."""
+        tdf = self.read_tasmota_data()
+        if tdf is None or tdf.empty:
+            return False
+
+        pivot_df = tdf.pivot_table(index='datetime', columns='device', values='power', aggfunc='last')
+        devices_changed = False
+
+        for device in pivot_df.columns:
+            if device not in self.tasmota_lines:
+                color = self._tasmota_color_map.get(device)
+                if color is None:
+                    color = next(self._tasmota_color_cycle)
+                    self._tasmota_color_map[device] = color
+                line, = self.ax1.plot([], [], linewidth=1.5, label=str(device), color=color)
+                self.tasmota_lines[device] = line
+                devices_changed = True
+
+            self.tasmota_lines[device].set_data(pivot_df.index, pivot_df[device])
+
+        return devices_changed
+    
     def update_plot(self, frame):
         """Update the plot with new data."""
         df = self.read_data()
@@ -236,6 +318,9 @@ class LivePowerMonitor:
         self.line_net.set_data(df['datetime'], df['real_power_net'])
         self.line_in.set_data(df['datetime'], df['real_power_in'])
         self.line_out.set_data(df['datetime'], df['real_power_out'])
+        
+        # Update (or create) Tasmota smart-plug power lines, if configured
+        tasmota_devices_changed = self._update_tasmota_lines()
         
         # Update Energy Overview plot (bottom) - Bar chart with 15-min intervals
         # Clear previous bars
@@ -305,6 +390,16 @@ class LivePowerMonitor:
                     visible['real_power_in'],
                     visible['real_power_out'],
                 ])
+                # Include Tasmota device lines currently within the visible window
+                for line in self.tasmota_lines.values():
+                    xdata, ydata = line.get_data()
+                    if len(ydata) == 0:
+                        continue
+                    xdata_num = mdates.date2num(xdata) if len(xdata) and not isinstance(xdata[0], (int, float)) else xdata
+                    view_start_num = mdates.date2num(view_start)
+                    mask = np.asarray(xdata_num) >= view_start_num
+                    if mask.any():
+                        y_vals = pd.concat([y_vals, pd.Series(np.asarray(ydata)[mask])])
                 ymin = float(y_vals.min())
                 ymax = float(y_vals.max())
                 margin = (ymax - ymin) * 0.1 if ymax > ymin else 10
@@ -317,9 +412,12 @@ class LivePowerMonitor:
             # Update the slider's valid range to the full data span
             self._update_slider_range()
         
-        # Add legends (only if not already present)
-        if not self.ax1.get_legend():
+        # Add legends (only if not already present, or rebuild if the set of
+        # Tasmota device lines changed since the last refresh)
+        if tasmota_devices_changed or not self.ax1.get_legend():
             self.ax1.legend(loc='upper left')
+        if tasmota_devices_changed:
+            self._rebuild_cursor()
         
         # Format x-axis to show time
         date_format = DateFormatter('%H:%M:%S')
@@ -649,11 +747,15 @@ def main():
                        help='Update interval in milliseconds (default: 5000)')
     parser.add_argument('--file', type=str, default=DATA_FILE,
                        help=f'Path to CSV data file (default: {DATA_FILE})')
+    parser.add_argument('--tasmota-file', type=str, default=TASMOTA_DATA_FILE,
+                       help=f'Path to Tasmota smart-plug CSV file (default: {TASMOTA_DATA_FILE}). '
+                            f'Ignored if the file does not exist.')
     args = parser.parse_args()
     
     # Get script directory
     script_dir = os.path.dirname(os.path.abspath(__file__))
     data_file = os.path.join(script_dir, args.file)
+    tasmota_file = os.path.join(script_dir, args.tasmota_file)
     
     print("=" * 70)
     print("Smart Meter Live Monitor")
@@ -679,7 +781,7 @@ def main():
         sys.exit(1)
     
     try:
-        monitor = LivePowerMonitor(data_file, display_hours=args.hours)
+        monitor = LivePowerMonitor(data_file, display_hours=args.hours, tasmota_file=tasmota_file)
         monitor.start(interval=args.interval)
     except KeyboardInterrupt:
         print("\nMonitor stopped by user.")

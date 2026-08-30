@@ -18,6 +18,9 @@ include/
 *.log
 power_data.csv
 power_data_demo.csv
+*.csv.backup
+*.csv.old
+power_data_backup.csv
 
 # Generated plots
 plots/

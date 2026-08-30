@@ -385,6 +385,12 @@ def plot_power_overview_interactive(df, hours=24):
             line = sel.artist
             xdata, ydata = line.get_data()
             
+            # Convert to numpy arrays if they're pandas Series
+            if hasattr(xdata, 'values'):
+                xdata = xdata.values
+            if hasattr(ydata, 'values'):
+                ydata = ydata.values
+            
             # sel.target contains the (x, y) coordinates
             x_target, y_target = sel.target
             
@@ -395,7 +401,6 @@ def plot_power_overview_interactive(df, hours=24):
                 index = int(sel.index) if not isinstance(sel.index, int) else sel.index
             else:
                 # Find nearest point manually
-                import numpy as np
                 distances = np.abs(xdata - x_target)
                 index = np.argmin(distances)
             

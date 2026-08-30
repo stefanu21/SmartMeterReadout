@@ -89,6 +89,14 @@ Die GUI ist vollständig interaktiv:
 - **'g'** - Gitter ein/aus
 - **'l'** - Logarithmische Y-Achse ein/aus
 
+**Interaktive Cursor (optional):**
+- **Hover über Power-Kurven** - Zeigt Zeit und Watt-Werte an
+- Funktioniert automatisch, wenn `mplcursors` installiert ist:
+  ```bash
+  pip install mplcursors
+  ```
+- Ohne `mplcursors` funktionieren die Plots weiterhin normal
+
 ## Beispiele
 
 ```bash

@@ -81,7 +81,7 @@ python3 plot_power_data.py
 # Letzte 6 Stunden
 python3 plot_power_data.py --hours 6
 
-# Interaktive Ansicht mit Zoom/Pan
+# Interaktive Ansicht mit Zoom/Pan und Hover-Cursor
 python3 plot_power_data.py --hours 6 --interactive
 
 # Kurz: Interaktiv
@@ -93,8 +93,13 @@ python3 plot_power_data.py --file power_data_2024.csv
 
 **Erzeugte Grafiken:**
 - `plots/power_overview_Xh.png` - RealPower, RealPowerIn, RealPowerOut
-- `plots/energy_overview_Xh.png` - RealEnergyIn, RealEnergyOut
+- `plots/energy_overview_Xh.png` - RealEnergyIn, RealEnergyOut (15-min Balkendiagramm)
 - `plots/daily_summary.png` - Tägliche Durchschnitte (ab 2 Tagen)
+
+**Interaktive Features (mit --interactive):**
+- Hover-Cursor zeigt Zeit und Watt-Werte beim Überfahren der Kurven
+- Zoom/Pan mit Maus und Tastatur
+- Benötigt `mplcursors` für Cursor-Tooltips: `pip install mplcursors` (optional)
 
 ---
 

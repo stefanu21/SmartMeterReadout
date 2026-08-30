@@ -30,8 +30,16 @@ if not backend_set:
 
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+import matplotlib.dates as mdates
 from matplotlib.dates import DateFormatter
 from datetime import datetime, timedelta
+
+# Try to import mplcursors for interactive cursor
+try:
+    import mplcursors
+    HAS_MPLCURSORS = True
+except ImportError:
+    HAS_MPLCURSORS = False
 
 # Configuration
 DATA_FILE = "power_data.csv"
@@ -62,6 +70,21 @@ class LivePowerMonitor:
         # Text for statistics
         self.stats_text = self.fig.text(0.02, 0.02, '', fontsize=10, family='monospace',
                                         verticalalignment='bottom')
+        
+        # Add interactive cursor for power lines if mplcursors is available
+        self.cursor = None
+        if HAS_MPLCURSORS:
+            self.cursor = mplcursors.cursor([self.line_net, self.line_in, self.line_out], hover=True)
+            @self.cursor.connect("add")
+            def on_add(sel):
+                # Get the data point
+                x, y = sel.target
+                time_str = mdates.num2date(x).strftime('%H:%M:%S')
+                sel.annotation.set_text(f'{time_str}\n{y:.1f} W')
+                sel.annotation.get_bbox_patch().set(fc="white", alpha=0.9)
+            print("Info: Interactive cursor enabled (hover over power curves to see values)")
+        else:
+            print("Info: Install 'mplcursors' for interactive hover tooltips: pip install mplcursors")
         
     def setup_axes(self):
         """Configure the plot axes."""

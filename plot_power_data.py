@@ -11,6 +11,13 @@ from datetime import datetime, timedelta
 import sys
 import os
 
+# Try to import mplcursors for interactive cursor
+try:
+    import mplcursors
+    HAS_MPLCURSORS = True
+except ImportError:
+    HAS_MPLCURSORS = False
+
 # Configuration
 DATA_FILE = "power_data.csv"
 OUTPUT_DIR = "plots"
@@ -348,12 +355,12 @@ def plot_power_overview_interactive(df, hours=24):
     
     fig, ax = plt.subplots(figsize=(16, 8))
     
-    ax.plot(df_filtered['datetime'], df_filtered['real_power_net'], 
-            label='RealPower (Net)', linewidth=2, color='blue')
-    ax.plot(df_filtered['datetime'], df_filtered['real_power_in'], 
-            label='RealPowerIn (Consumption)', linewidth=1.5, color='red', alpha=0.7)
-    ax.plot(df_filtered['datetime'], df_filtered['real_power_out'], 
-            label='RealPowerOut (Feed-in)', linewidth=1.5, color='green', alpha=0.7)
+    line_net = ax.plot(df_filtered['datetime'], df_filtered['real_power_net'], 
+                       label='RealPower (Net)', linewidth=2, color='blue')
+    line_in = ax.plot(df_filtered['datetime'], df_filtered['real_power_in'], 
+                      label='RealPowerIn (Consumption)', linewidth=1.5, color='red', alpha=0.7)
+    line_out = ax.plot(df_filtered['datetime'], df_filtered['real_power_out'], 
+                       label='RealPowerOut (Feed-in)', linewidth=1.5, color='green', alpha=0.7)
     
     ax.axhline(y=0, color='gray', linestyle='--', linewidth=0.8, alpha=0.7)
     ax.set_xlabel('Time', fontsize=12)
@@ -364,6 +371,20 @@ def plot_power_overview_interactive(df, hours=24):
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
     plt.xticks(rotation=45)
     plt.tight_layout()
+    
+    # Add interactive cursor if mplcursors is available
+    if HAS_MPLCURSORS:
+        cursor = mplcursors.cursor(line_net + line_in + line_out, hover=True)
+        @cursor.connect("add")
+        def on_add(sel):
+            # Get the data point
+            x, y = sel.target
+            time_str = mdates.num2date(x).strftime('%H:%M:%S')
+            sel.annotation.set_text(f'{time_str}\n{y:.1f} W')
+            sel.annotation.get_bbox_patch().set(fc="white", alpha=0.9)
+    else:
+        print("Info: Install 'mplcursors' for interactive hover tooltips: pip install mplcursors")
+    
     plt.show(block=False)
 
 def plot_energy_overview_interactive(df, hours=24):

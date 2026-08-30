@@ -44,6 +44,16 @@ sudo apt-get install python3-pyqt5
 pip install PyQt5
 ```
 
+## Interaktive Cursor (optional)
+
+Für interaktive Tooltip-Cursor beim Überfahren der Power-Kurven:
+```bash
+pip install mplcursors
+```
+
+**Hinweis:** Dies ist optional. Wenn `mplcursors` nicht installiert ist, funktionieren die Plots
+weiterhin normal, aber ohne die Hover-Tooltips die Zeit und Watt-Werte anzeigen.
+
 ## Für Server ohne GUI
 
 Wenn Sie das System auf einem Server ohne Display betreiben:
@@ -57,8 +67,11 @@ Wenn Sie das System auf einem Server ohne Display betreiben:
 # Prüfen ob tkinter verfügbar ist:
 python3 -c "import tkinter; print('tkinter OK')"
 
-# Wenn Fehler: tkinter nicht installiert
-# Wenn "tkinter OK": tkinter ist verfügbar
+# Prüfen ob mplcursors verfügbar ist:
+python3 -c "import mplcursors; print('mplcursors OK')"
+
+# Wenn Fehler: Paket nicht installiert
+# Wenn "... OK": Paket ist verfügbar
 ```
 
 ## Warum nicht in requirements.txt?

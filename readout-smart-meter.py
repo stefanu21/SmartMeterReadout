@@ -168,13 +168,19 @@ if args.clear_data:
         try:
             import shutil
             shutil.copy2(DATA_FILE, backup_file)
-            os.remove(DATA_FILE)
-            log(f"Old data removed. Starting fresh. Backup saved to: {backup_file}")
+            log(f"Backup saved to: {backup_file}")
         except Exception as e:
-            log(f"Error handling --clear-data: {str(e)}", True)
+            log(f"Error creating backup: {str(e)}", True)
             sys.exit(1)
-    else:
-        log("No existing data file found. Starting fresh.")
+    
+    # Create new empty file with header (don't delete - GUI might already be starting)
+    try:
+        with open(DATA_FILE, 'w') as f:
+            f.write("timestamp,datetime,real_power_in,real_power_out,real_power_net,real_energy_in,real_energy_out\n")
+        log("Old data cleared. Starting fresh with new file.")
+    except Exception as e:
+        log(f"Error creating new data file: {str(e)}", True)
+        sys.exit(1)
 
 # Override configuration from command line
 if args.key:

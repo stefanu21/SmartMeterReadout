@@ -47,7 +47,11 @@ Wenn Sie alte Daten entfernen und neu starten möchten:
 python3 readout-smart-meter.py --clear-data
 ```
 
-Dies erstellt automatisch ein Backup als `power_data.csv.backup` bevor die alten Daten gelöscht werden.
+Dies:
+- Erstellt automatisch ein Backup als `power_data.csv.backup`
+- Ersetzt die Datei mit einer neuen leeren Datei (mit Header)
+- Alte Daten sind sicher im Backup gespeichert
+- Die neue Datei existiert sofort (wichtig wenn --gui verwendet wird)
 
 **Oder manuell:**
 ```bash

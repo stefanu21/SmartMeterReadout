@@ -146,6 +146,11 @@ class SignalHandler:
     def shutdown_requested(self):
         return self._shutdown
 
+    def request_shutdown(self):
+        """Programmatically request a graceful shutdown (e.g. from a
+        background thread), without going through the OS signal handler."""
+        self._shutdown = True
+
 
 # Parse command line arguments
 parser = argparse.ArgumentParser(description='Smart Meter Readout - DLMS/COSEM Protocol')
@@ -243,6 +248,28 @@ ser = serial.Serial(
     timeout=TIMEOUT
 )
 
+# Watch the GUI process (if started) in a background thread so that closing
+# the GUI window triggers an immediate shutdown, instead of waiting for the
+# current blocking serial read (up to TIMEOUT seconds) to finish first.
+gui_watcher_stop = threading.Event()
+
+def _watch_gui_process():
+    while not gui_watcher_stop.is_set():
+        if gui_process.poll() is not None:
+            log("GUI window closed - shutting down data collection.")
+            signalHandler.request_shutdown()
+            try:
+                ser.cancel_read()
+            except Exception:
+                pass
+            break
+        gui_watcher_stop.wait(0.2)
+
+gui_watcher_thread = None
+if gui_process is not None:
+    gui_watcher_thread = threading.Thread(target=_watch_gui_process, daemon=True)
+    gui_watcher_thread.start()
+
 payload1StartPos = 27
 payload2StartPos = 9
 
@@ -254,12 +281,6 @@ measurementCounter = 0  # Counter for logging interval
 
 while not signalHandler.shutdown_requested():
     try:
-        # If the GUI monitor was started and has been closed by the user,
-        # shut down the main program as well.
-        if gui_process is not None and gui_process.poll() is not None:
-            log("GUI window closed - shutting down data collection.")
-            break
-
         data = ser.read(size=FRAME_LENGTH)
 
         if data == b"":
@@ -393,6 +414,7 @@ while not signalHandler.shutdown_requested():
             break
         lastError = time.time()
 
+gui_watcher_stop.set()
 ser.close()
 
 # Cleanup GUI process if it was started

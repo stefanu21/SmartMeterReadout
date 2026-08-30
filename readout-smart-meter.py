@@ -164,23 +164,28 @@ log(f"Using VNB_KEY: {VNB_KEY[:8]}... (first 8 chars shown)")
 # Start GUI monitor if requested
 gui_process = None
 if args.gui:
-    try:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        gui_script = os.path.join(script_dir, "live_monitor.py")
-        
-        if os.path.exists(gui_script):
-            log(f"Starting live GUI monitor (showing last {args.gui_hours} hour(s))...")
-            gui_process = subprocess.Popen([
-                sys.executable, 
-                gui_script,
-                '--hours', str(args.gui_hours),
-                '--file', DATA_FILE
-            ])
-            log(f"GUI monitor started with PID {gui_process.pid}")
-        else:
-            log(f"Warning: GUI script not found at {gui_script}", True)
-    except Exception as e:
-        log(f"Failed to start GUI monitor: {str(e)}", True)
+    # Check if display is available
+    if 'DISPLAY' not in os.environ and sys.platform.startswith('linux'):
+        log("Warning: --gui option ignored - no DISPLAY environment variable found", True)
+        log("GUI requires a graphical environment. Use plot_power_data.py for static plots instead.")
+    else:
+        try:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            gui_script = os.path.join(script_dir, "live_monitor.py")
+            
+            if os.path.exists(gui_script):
+                log(f"Starting live GUI monitor (showing last {args.gui_hours} hour(s))...")
+                gui_process = subprocess.Popen([
+                    sys.executable, 
+                    gui_script,
+                    '--hours', str(args.gui_hours),
+                    '--file', DATA_FILE
+                ])
+                log(f"GUI monitor started with PID {gui_process.pid}")
+            else:
+                log(f"Warning: GUI script not found at {gui_script}", True)
+        except Exception as e:
+            log(f"Failed to start GUI monitor: {str(e)}", True)
 
 signalHandler = SignalHandler()
 

@@ -1,5 +1,14 @@
 # Smart Meter Live GUI Monitor
 
+## Wichtiger Hinweis
+
+**Die Live-GUI benötigt eine grafische Umgebung (Desktop)!**
+
+Wenn Sie das System über SSH verwenden oder auf einem Server ohne Desktop arbeiten:
+- ✗ Die GUI wird **nicht** funktionieren
+- ✓ Verwenden Sie stattdessen `plot_power_data.py` für statische PNG-Grafiken
+- ✓ Oder verwenden Sie SSH mit X11-Forwarding: `ssh -X user@host`
+
 ## Schnellstart
 
 ### Option 1: Mit Smart Meter (Live-Daten)
@@ -92,6 +101,25 @@ pip install -r requirements.txt
 - Das GUI läuft unabhängig vom Hauptskript
 - Schließen Sie das GUI-Fenster zum Beenden
 - Bei `--gui` wird das GUI automatisch mit dem Hauptskript beendet
+
+### Wichtig: Grafische Umgebung erforderlich
+
+Die GUI benötigt einen Desktop/X11-Server:
+- ✓ Funktioniert auf Desktop-Systemen (Linux, macOS, Windows)
+- ✓ Funktioniert mit X11-Forwarding: `ssh -X user@host`
+- ✗ Funktioniert NICHT auf Servern ohne Display
+- Alternative für Server: Verwenden Sie `plot_power_data.py`
+
+### Kein Display verfügbar?
+
+Wenn Sie die Meldung "No DISPLAY environment variable" sehen:
+
+```bash
+# Statt GUI: Erstellen Sie statische Plots
+python3 plot_power_data.py
+```
+
+Das erstellt PNG-Dateien im `plots/` Ordner, die Sie herunterladen und ansehen können.
 
 ## Weitere Informationen
 

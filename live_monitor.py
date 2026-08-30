@@ -5,6 +5,15 @@ Displays real-time power consumption in a continuously updating window.
 """
 
 import pandas as pd
+import matplotlib
+# Use TkAgg backend for better compatibility, fall back to Agg if no display
+try:
+    matplotlib.use('TkAgg')
+except:
+    try:
+        matplotlib.use('Qt5Agg')
+    except:
+        pass  # Will try default backend
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.dates import DateFormatter
@@ -177,12 +186,30 @@ def main():
     print("Close the window or press Ctrl+C to exit.")
     print("=" * 70)
     
+    # Check if display is available
+    if 'DISPLAY' not in os.environ and sys.platform.startswith('linux'):
+        print("\nWARNING: No DISPLAY environment variable found!")
+        print("The GUI cannot be shown without a graphical environment.")
+        print("")
+        print("Options:")
+        print("  1. Run on a system with desktop environment")
+        print("  2. Use X11 forwarding: ssh -X user@host")
+        print("  3. Use VNC or other remote desktop")
+        print("  4. Use plot_power_data.py to generate static PNG files instead")
+        sys.exit(1)
+    
     try:
         monitor = LivePowerMonitor(data_file, display_hours=args.hours)
         monitor.start(interval=args.interval)
     except KeyboardInterrupt:
         print("\nMonitor stopped by user.")
         sys.exit(0)
+    except Exception as e:
+        print(f"\nError starting GUI: {e}")
+        print("\nIf you see display-related errors, the GUI cannot run without")
+        print("a graphical environment. Use plot_power_data.py instead to")
+        print("generate static plots.")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

@@ -11,6 +11,7 @@ import matplotlib.dates as mdates
 from datetime import datetime, timedelta
 import sys
 import os
+import time
 
 # Try to import mplcursors for interactive cursor
 try:
@@ -22,6 +23,18 @@ except ImportError:
 # Configuration
 DATA_FILE = "power_data.csv"
 OUTPUT_DIR = "plots"
+
+def clamp_ylim_nonnegative(ax, values):
+    """After autoscale, raise the y-axis lower limit to 0 if none of the
+    plotted power values are actually negative (avoids a misleading
+    negative-looking axis when the meter never feeds power back in)."""
+    try:
+        data_min = float(min(v.min() for v in values if len(v) > 0))
+    except ValueError:
+        return
+    if data_min >= 0:
+        ymin, ymax = ax.get_ylim()
+        ax.set_ylim(max(0, ymin), ymax)
 
 def load_data(filepath):
     """Load power data from CSV file."""
@@ -150,8 +163,9 @@ def plot_power_overview(df, hours=24):
     ax.set_title(f'Power Overview - Last {hours} Hours', fontsize=14, fontweight='bold')
     ax.legend(loc='upper left', fontsize=11)
     ax.grid(True, alpha=0.3)
-    
-    # Format x-axis
+    clamp_ylim_nonnegative(ax, [df_filtered['real_power_net'],
+                                df_filtered['real_power_in'],
+                                df_filtered['real_power_out']])
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
     if hours <= 2:
         ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=15))
@@ -340,6 +354,142 @@ def print_statistics(df, hours=24):
     
     print(f"{'='*60}\n")
 
+class PlotNavigator:
+    """Adds mouse-wheel and keyboard navigation to a static (non-live) plot.
+
+    Controls (mirrors live_monitor.py):
+      - Mouse wheel:          Scroll Y-axis up/down (pan)
+      - Shift + mouse wheel:   Zoom Y-axis in/out
+      - Ctrl + mouse wheel:    Zoom X-axis in/out
+      - Up / Down arrows:      Scroll Y-axis up/down
+      - Left / Right arrows:   Scroll X-axis (time) left/right
+      - '+' / '-':             Zoom Y-axis in/out
+      - 'r':                   Reset to the original view
+    """
+
+    def __init__(self, fig, ax):
+        self.fig = fig
+        self.ax = ax
+        # Remember the initial view so 'r' can restore it
+        self._home_xlim = ax.get_xlim()
+        self._home_ylim = ax.get_ylim()
+        # Throttle keyboard events to avoid backlog / "running on" after release
+        self._last_key_time = 0.0
+        self._key_min_interval = 0.05
+        fig.canvas.mpl_connect('scroll_event', self.on_scroll)
+        fig.canvas.mpl_connect('key_press_event', self.on_key)
+
+    def _get_data_yrange(self):
+        """Return (data_min, data_max) of all line data in the axes."""
+        data_min = None
+        data_max = None
+        for line in self.ax.get_lines():
+            ydata = line.get_ydata()
+            if ydata is None or len(ydata) == 0:
+                continue
+            try:
+                ymin = float(np.nanmin(ydata))
+                ymax = float(np.nanmax(ydata))
+            except (ValueError, TypeError):
+                continue
+            data_min = ymin if data_min is None else min(data_min, ymin)
+            data_max = ymax if data_max is None else max(data_max, ymax)
+        return data_min, data_max
+
+    def _clamp_ypan(self, new_ymin, new_ymax):
+        """Clamp a proposed Y-view so the measurement data stays visible."""
+        data_min, data_max = self._get_data_yrange()
+        if data_min is None:
+            return new_ymin, new_ymax
+        view_height = new_ymax - new_ymin
+        max_ymin = data_max - view_height * 0.1
+        min_ymin = data_min - view_height * 0.9
+        clamped_ymin = max(min_ymin, min(new_ymin, max_ymin))
+        if data_min >= 0:
+            clamped_ymin = max(0, clamped_ymin)
+        clamped_ymax = clamped_ymin + view_height
+        return clamped_ymin, clamped_ymax
+
+    def on_scroll(self, event):
+        if event.inaxes is not self.ax:
+            return
+        ax = self.ax
+        step = event.step
+        key = event.key
+
+        if key == 'control':
+            xmin, xmax = ax.get_xlim()
+            xrange = xmax - xmin
+            scale = 0.9 if step > 0 else 1.1
+            xdata = event.xdata if event.xdata is not None else (xmin + xmax) / 2
+            new_range = xrange * scale
+            left_frac = (xdata - xmin) / xrange
+            ax.set_xlim(xdata - new_range * left_frac,
+                        xdata + new_range * (1 - left_frac))
+        elif key == 'shift':
+            ymin, ymax = ax.get_ylim()
+            yrange = ymax - ymin
+            scale = 0.9 if step > 0 else 1.1
+            ydata = event.ydata if event.ydata is not None else (ymin + ymax) / 2
+            new_range = yrange * scale
+            bottom_frac = (ydata - ymin) / yrange
+            ax.set_ylim(ydata - new_range * bottom_frac,
+                        ydata + new_range * (1 - bottom_frac))
+        else:
+            ymin, ymax = ax.get_ylim()
+            shift = (ymax - ymin) * 0.1 * step
+            new_ymin, new_ymax = self._clamp_ypan(ymin + shift, ymax + shift)
+            ax.set_ylim(new_ymin, new_ymax)
+
+        self.fig.canvas.draw_idle()
+
+    def on_key(self, event):
+        if event.key == 'r':
+            self.ax.set_xlim(self._home_xlim)
+            self.ax.set_ylim(self._home_ylim)
+            self.fig.canvas.draw_idle()
+            return
+
+        if event.key not in ('up', 'down', 'left', 'right', '+', '=', '-'):
+            return
+
+        # Throttle to avoid an event backlog that keeps the plot moving
+        now = time.monotonic()
+        if now - self._last_key_time < self._key_min_interval:
+            return
+        self._last_key_time = now
+
+        ax = self.ax
+        if event.key == 'up':
+            ymin, ymax = ax.get_ylim()
+            shift = (ymax - ymin) * 0.1
+            ax.set_ylim(*self._clamp_ypan(ymin + shift, ymax + shift))
+        elif event.key == 'down':
+            ymin, ymax = ax.get_ylim()
+            shift = (ymax - ymin) * 0.1
+            ax.set_ylim(*self._clamp_ypan(ymin - shift, ymax - shift))
+        elif event.key == 'right':
+            xmin, xmax = ax.get_xlim()
+            shift = (xmax - xmin) * 0.1
+            ax.set_xlim(xmin + shift, xmax + shift)
+        elif event.key == 'left':
+            xmin, xmax = ax.get_xlim()
+            shift = (xmax - xmin) * 0.1
+            ax.set_xlim(xmin - shift, xmax - shift)
+        elif event.key in ('+', '='):
+            ymin, ymax = ax.get_ylim()
+            center = (ymin + ymax) / 2
+            half = (ymax - ymin) / 2 * 0.9
+            ax.set_ylim(center - half, center + half)
+        elif event.key == '-':
+            ymin, ymax = ax.get_ylim()
+            center = (ymin + ymax) / 2
+            half = (ymax - ymin) / 2 * 1.1
+            ax.set_ylim(center - half, center + half)
+
+        self.fig.canvas.draw_idle()
+
+
 def plot_power_overview_interactive(df, hours=24):
     """Interactive version of power overview plot."""
     if df.empty:
@@ -369,9 +519,15 @@ def plot_power_overview_interactive(df, hours=24):
     ax.set_title(f'Power Overview - Last {hours} Hours (INTERACTIVE)', fontsize=14, fontweight='bold')
     ax.legend(loc='upper left', fontsize=11)
     ax.grid(True, alpha=0.3)
+    clamp_ylim_nonnegative(ax, [df_filtered['real_power_net'],
+                                df_filtered['real_power_in'],
+                                df_filtered['real_power_out']])
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
     plt.xticks(rotation=45)
     plt.tight_layout()
+    
+    # Enable mouse-wheel / keyboard navigation (scroll, zoom, pan, reset)
+    ax._navigator = PlotNavigator(fig, ax)
     
     # Add interactive cursor if mplcursors is available
     if HAS_MPLCURSORS:
@@ -540,12 +696,16 @@ def main():
     if args.interactive:
         print("\nShowing interactive plots...")
         print("\nINTERACTIVE CONTROLS:")
-        print("  🏠 Home button  - Reset view")
+        print("  🏠 Home button  - Reset view (toolbar)")
         print("  ➕ Zoom button  - Click and drag to zoom")
         print("  🖐️  Pan button   - Click and drag to pan")
         print("  Mouse wheel    - Scroll Y-axis")
         print("  Shift+wheel    - Zoom Y-axis")
         print("  Ctrl+wheel     - Zoom X-axis")
+        print("  ↑ / ↓ keys     - Scroll Y-axis")
+        print("  ← / → keys     - Scroll X-axis (time)")
+        print("  + / - keys     - Zoom Y-axis in/out")
+        print("  r key          - Reset to original view")
         print()
         # Show interactive plots (don't close, don't save)
         plot_power_overview_interactive(df, hours=args.hours)

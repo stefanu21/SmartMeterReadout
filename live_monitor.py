@@ -308,7 +308,11 @@ class LivePowerMonitor:
                 ymin = float(y_vals.min())
                 ymax = float(y_vals.max())
                 margin = (ymax - ymin) * 0.1 if ymax > ymin else 10
-                self.ax1.set_ylim(ymin - margin, ymax + margin)
+                # Don't extend the view below 0 unless the data itself is negative
+                lower = ymin - margin
+                if ymin >= 0:
+                    lower = max(0, lower)
+                self.ax1.set_ylim(lower, ymax + margin)
 
             # Update the slider's valid range to the full data span
             self._update_slider_range()
@@ -390,6 +394,9 @@ class LivePowerMonitor:
         min_ymin = data_min - view_height * 0.9
 
         clamped_ymin = max(min_ymin, min(new_ymin, max_ymin))
+        # Don't let the view drop below 0 if the data itself is never negative
+        if data_min >= 0:
+            clamped_ymin = max(0, clamped_ymin)
         clamped_ymax = clamped_ymin + view_height
         return clamped_ymin, clamped_ymax
 

@@ -21,6 +21,8 @@ Die CSV-Datei `power_data.csv` enthält folgende Spalten:
 - `real_power_in`: Bezogene Leistung in Watt (vom Netz)
 - `real_power_out`: Eingespeiste Leistung in Watt (ins Netz)
 - `real_power_net`: Netto-Leistung in Watt (Bezug - Einspeisung)
+- `real_energy_in`: Gesamt-Energiezähler Bezug in Wh
+- `real_energy_out`: Gesamt-Energiezähler Einspeisung in Wh
 
 ## Verwendung
 
@@ -35,6 +37,29 @@ python3 readout-smart-meter.py
 Das Skript liest alle ~5 Sekunden die Daten vom Smart Meter und schreibt sie in die CSV-Datei.
 
 **Beim Neustart**: Die Datei wird nicht überschrieben - neue Daten werden automatisch angehängt. Sie können das Programm beliebig oft stoppen und neu starten, ohne Daten zu verlieren.
+
+#### Abtastrate anpassen
+
+Standardmäßig wird jede Messung (~alle 5 Sekunden) geloggt. Sie können dies mit `--log-interval` anpassen:
+
+```bash
+# Jede Messung loggen (~5 Sekunden, Standard)
+python3 readout-smart-meter.py --log-interval 1
+
+# Jede 12. Messung loggen (~1 Minute)
+python3 readout-smart-meter.py --log-interval 12
+
+# Jede 60. Messung loggen (~5 Minuten)
+python3 readout-smart-meter.py --log-interval 60
+
+# Jede 120. Messung loggen (~10 Minuten)
+python3 readout-smart-meter.py --log-interval 120
+```
+
+**Empfehlung:**
+- Für detaillierte Analysen: `--log-interval 1` (Standard)
+- Für Langzeit-Monitoring: `--log-interval 12` (1 Minute)
+- Für Server mit begrenztem Speicher: `--log-interval 60` (5 Minuten)
 
 ### 1a. Mit Live-GUI Monitor (optional)
 
@@ -94,11 +119,21 @@ python3 plot_power_data.py
 
 Das Skript erstellt folgende Visualisierungen:
 
-- **power_last_24h.png**: Netto-Stromverbrauch der letzten 24 Stunden
-- **power_in_out_last_24h.png**: Getrennte Darstellung von Bezug und Einspeisung
+- **power_overview_24h.png**: RealPower (Net), RealPowerIn und RealPowerOut in einer Grafik
+- **energy_overview_24h.png**: RealEnergyIn und RealEnergyOut Zählerstände
 - **daily_summary.png**: Tägliche Durchschnittswerte (ab 2 Tagen Daten)
 
 Alle Grafiken werden im Ordner `plots/` gespeichert.
+
+Sie können auch andere Zeiträume wählen:
+
+```bash
+# Letzte 6 Stunden
+python3 plot_power_data.py --hours 6
+
+# Letzte 2 Stunden
+python3 plot_power_data.py --hours 2
+```
 
 ### 4. Dependencies installieren
 
@@ -124,6 +159,17 @@ DATA_FILE = os.path.realpath(os.path.join(os.path.dirname(__file__), "power_data
 
 # Datenerfassung aktivieren/deaktivieren
 ENABLE_DATA_LOGGING = True
+
+# Abtastrate: Logge jede N-te Messung
+LOGGING_INTERVAL = 1  # 1 = jede Messung (~5 sec)
+                      # 12 = jede 12. Messung (~1 min)
+                      # 60 = jede 60. Messung (~5 min)
+```
+
+Oder verwenden Sie Kommandozeilen-Parameter (überschreibt die Konfiguration):
+
+```bash
+python3 readout-smart-meter.py --log-interval 12
 ```
 
 ## Beispielausgabe
@@ -160,10 +206,34 @@ Power Feed-in (real_power_out):
 
 ## Tipps
 
-- Das Skript sammelt etwa alle 5 Sekunden einen Datenpunkt
-- Pro Tag werden ca. 17.280 Datenpunkte gesammelt
+### Datenmenge und Speicherbedarf
+
+- Das Skript sammelt standardmäßig etwa alle 5 Sekunden einen Datenpunkt
+- Pro Tag werden ca. 17.280 Datenpunkte gesammelt (bei `--log-interval 1`)
 - Die CSV-Datei wächst ca. 1-2 MB pro Tag
-- Für längere Zeiträume können Sie ältere Daten archivieren oder löschen
+
+### Speicher sparen mit Abtastrate
+
+Mit `--log-interval` können Sie die Datenmenge reduzieren:
+
+| Interval | Abtastrate | Datenpunkte/Tag | Dateigröße/Tag |
+|----------|-----------|-----------------|----------------|
+| 1 | ~5 sec | 17.280 | ~1.5 MB |
+| 12 | ~1 min | 1.440 | ~130 KB |
+| 60 | ~5 min | 288 | ~26 KB |
+| 120 | ~10 min | 144 | ~13 KB |
+
+### Daten archivieren
+
+Für längere Zeiträume können Sie ältere Daten archivieren:
+
+```bash
+# Monatliches Backup
+cp power_data.csv power_data_$(date +%Y%m).csv
+
+# Alte Daten löschen (Optional - Achtung: Datenverlust!)
+# > power_data.csv  # Leert die Datei
+```
 
 ## Eigene Grafiken erstellen
 

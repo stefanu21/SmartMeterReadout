@@ -6,20 +6,32 @@ Displays real-time power consumption in a continuously updating window.
 
 import pandas as pd
 import matplotlib
-# Use TkAgg backend for better compatibility, fall back to Agg if no display
-try:
-    matplotlib.use('TkAgg')
-except:
+import os
+import sys
+
+# Try different backends in order of preference
+# We need to set backend before importing pyplot
+backend_set = False
+for backend in ['TkAgg', 'Qt5Agg', 'GTK3Agg', 'WXAgg']:
     try:
-        matplotlib.use('Qt5Agg')
-    except:
-        pass  # Will try default backend
+        matplotlib.use(backend, force=True)
+        backend_set = True
+        break
+    except (ImportError, ModuleNotFoundError):
+        continue
+
+if not backend_set:
+    # Check if we have a display at all
+    if 'DISPLAY' not in os.environ and sys.platform.startswith('linux'):
+        print("\nERROR: No display available and no GUI backend found!")
+        print("Cannot show live GUI on this system.")
+        print("\nPlease use 'plot_power_data.py' to generate static PNG files instead.")
+        sys.exit(1)
+
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.dates import DateFormatter
 from datetime import datetime, timedelta
-import os
-import sys
 
 # Configuration
 DATA_FILE = "power_data.csv"

@@ -84,6 +84,8 @@ python3 live_monitor.py --file /pfad/zur/anderen.csv
 
 ## Voraussetzungen
 
+### Python-Pakete
+
 ```bash
 pip install pandas matplotlib
 ```
@@ -93,6 +95,27 @@ Oder:
 ```bash
 pip install -r requirements.txt
 ```
+
+### GUI-Backend (für Live-Monitor)
+
+Für die Live-GUI wird zusätzlich ein grafisches Backend benötigt:
+
+**Auf Debian/Ubuntu:**
+```bash
+sudo apt-get install python3-tk
+```
+
+**Auf Fedora/RHEL:**
+```bash
+sudo dnf install python3-tkinter
+```
+
+**Auf Arch Linux:**
+```bash
+sudo pacman -S tk
+```
+
+**Alternative:** Wenn tkinter nicht verfügbar ist, versucht das Skript automatisch andere Backends (Qt5, GTK3, WX).
 
 ## Hinweise
 

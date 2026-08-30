@@ -10,3 +10,10 @@ charset-normalizer
 # For data visualization
 pandas
 matplotlib
+
+# Note: tkinter is required for live GUI but cannot be installed via pip
+# Install it using your system package manager:
+#   Debian/Ubuntu: sudo apt-get install python3-tk
+#   Fedora/RHEL:   sudo dnf install python3-tkinter
+#   Arch Linux:    sudo pacman -S tk
+# For servers without GUI: Use plot_power_data.py instead of live_monitor.py

@@ -40,6 +40,11 @@ PRINT_LOGS = True
 # DATA LOGGING
 DATA_FILE = os.path.realpath(os.path.join(os.path.dirname(__file__), "power_data.csv"))
 ENABLE_DATA_LOGGING = True
+LOGGING_INTERVAL = 1  # Log every N-th measurement (1 = every measurement, 2 = every 2nd, etc.)
+                      # Smart meter sends data every ~5 seconds
+                      # LOGGING_INTERVAL=1  -> ~5 sec  (720 entries/hour)
+                      # LOGGING_INTERVAL=12 -> ~60 sec (60 entries/hour)
+                      # LOGGING_INTERVAL=60 -> ~5 min  (12 entries/hour)
 
 # -- CONFIGURATION END -- #
 
@@ -93,7 +98,7 @@ def log(msg, error=False):
             log_file.write("\n" + msg)
 
 
-def log_power_data(timestamp, real_power_in, real_power_out, real_power_net):
+def log_power_data(timestamp, real_power_in, real_power_out, real_power_net, real_energy_in, real_energy_out):
     """Log power data to CSV file for later graphing. Appends to existing file."""
     global DATA_FILE, ENABLE_DATA_LOGGING
     if not ENABLE_DATA_LOGGING:
@@ -114,11 +119,11 @@ def log_power_data(timestamp, real_power_in, real_power_out, real_power_net):
         with open(DATA_FILE, "a") as data_file:
             # Write header only if file is new or empty
             if write_header:
-                data_file.write("timestamp,datetime,real_power_in,real_power_out,real_power_net\n")
+                data_file.write("timestamp,datetime,real_power_in,real_power_out,real_power_net,real_energy_in,real_energy_out\n")
             
             # Write data row
             dt_string = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
-            data_file.write(f"{timestamp},{dt_string},{real_power_in},{real_power_out},{real_power_net}\n")
+            data_file.write(f"{timestamp},{dt_string},{real_power_in},{real_power_out},{real_power_net},{real_energy_in},{real_energy_out}\n")
     except Exception as e:
         log(f"Error writing power data: {str(e)}", True)
 
@@ -148,13 +153,20 @@ parser.add_argument('--key', type=str, help='AES decryption key (VNB_KEY) in hex
 parser.add_argument('--port', type=str, default=COM_PORT, help=f'Serial port (default: {COM_PORT})')
 parser.add_argument('--gui', action='store_true', help='Start live GUI monitor in a separate window')
 parser.add_argument('--gui-hours', type=float, default=1, help='Hours to display in GUI (default: 1)')
+parser.add_argument('--log-interval', type=int, default=LOGGING_INTERVAL, 
+                   help=f'Log every N-th measurement (default: {LOGGING_INTERVAL}). '
+                        f'Smart meter sends ~every 5 sec. Examples: 1=5sec, 12=1min, 60=5min')
 args = parser.parse_args()
 
-# Override VNB_KEY if provided via command line
+# Override configuration from command line
 if args.key:
     VNB_KEY = args.key
     log(f"Using VNB_KEY from command line parameter")
 if args.port:
+    COM_PORT = args.port
+if args.log_interval:
+    LOGGING_INTERVAL = args.log_interval
+    log(f"Logging interval set to every {LOGGING_INTERVAL} measurement(s) (~{LOGGING_INTERVAL * 5} seconds)")
     COM_PORT = args.port
 
 log("Start " + os.path.basename(__file__))
@@ -168,6 +180,7 @@ if args.gui:
     if 'DISPLAY' not in os.environ and sys.platform.startswith('linux'):
         log("Warning: --gui option ignored - no DISPLAY environment variable found", True)
         log("GUI requires a graphical environment. Use plot_power_data.py for static plots instead.")
+        log("Tip: If you have a desktop, you may need to install python3-tk: sudo apt-get install python3-tk")
     else:
         try:
             script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -213,6 +226,7 @@ lastRealEnergyIn = 0
 lastRealEnergyOut = 0
 lastError = 0
 errorCount = 0
+measurementCounter = 0  # Counter for logging interval
 
 while not signalHandler.shutdown_requested():
     try:
@@ -293,27 +307,32 @@ while not signalHandler.shutdown_requested():
             realPowerOut = data["RealPowerOut"]
             realPowerNet = realPowerIn - realPowerOut
             
-            # Log power data to CSV file
-            log_power_data(timestamp, realPowerIn, realPowerOut, realPowerNet)
+            # Increment measurement counter
+            measurementCounter += 1
+            
+            # Log power data to CSV file (only every N-th measurement)
+            if measurementCounter >= LOGGING_INTERVAL:
+                log_power_data(timestamp, realPowerIn, realPowerOut, realPowerNet, realEnergyIn, realEnergyOut)
+                measurementCounter = 0  # Reset counter
             
             print(os.linesep.join([
                 "",
                 "Timestamp:         " + datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S"),
-            #    "VoltageL1:         " + str(data["VoltageL1"] / 10) + " V",
-            #    "VoltageL2:         " + str(data["VoltageL2"] / 10) + " V",
-            #    "VoltageL3:         " + str(data["VoltageL3"] / 10) + " V",
-            #    "CurrentL1:         " + str(data["CurrentL1"] / 100) + " A",
-            #    "CurrentL2:         " + str(data["CurrentL2"] / 100) + " A",
-            #    "CurrentL3:         " + str(data["CurrentL3"] / 100) + " A",
+                "VoltageL1:         " + str(data["VoltageL1"] / 10) + " V",
+                "VoltageL2:         " + str(data["VoltageL2"] / 10) + " V",
+                "VoltageL3:         " + str(data["VoltageL3"] / 10) + " V",
+                "CurrentL1:         " + str(data["CurrentL1"] / 100) + " A",
+                "CurrentL2:         " + str(data["CurrentL2"] / 100) + " A",
+                "CurrentL3:         " + str(data["CurrentL3"] / 100) + " A",
                 "RealPower:         " + str(realPowerNet) + " W",
-            #    "RealPowerIn:       " + str(data["RealPowerIn"]) + " W",
-            #    "RealPowerOut:      " + str(data["RealPowerOut"]) + " W",
-            #    "RealEnergyIn:      " + str(data["RealEnergyIn"] / 1000) + " kWh",
-            #    "RealEnergyInDiff:  " + str(realEnergyIn - lastRealEnergyIn) + " Wh",
-            #    "RealEnergyOut:     " + str(data["RealEnergyOut"] / 1000) + " kWh",
-            #    "RealEnergyOutDiff: " + str(realEnergyOut - lastRealEnergyOut) + " Wh",
-            #    "ReactiveEnergyIn:  " + str(data["ReactiveEnergyIn"] / 1000) + " kvar",
-            #    "ReactiveEnergyOut: " + str(data["ReactiveEnergyOut"] / 1000) + " kvar",
+                "RealPowerIn:       " + str(data["RealPowerIn"]) + " W",
+                "RealPowerOut:      " + str(data["RealPowerOut"]) + " W",
+                "RealEnergyIn:      " + str(data["RealEnergyIn"] / 1000) + " kWh",
+                "RealEnergyInDiff:  " + str(realEnergyIn - lastRealEnergyIn) + " Wh",
+                "RealEnergyOut:     " + str(data["RealEnergyOut"] / 1000) + " kWh",
+                "RealEnergyOutDiff: " + str(realEnergyOut - lastRealEnergyOut) + " Wh",
+                "ReactiveEnergyIn:  " + str(data["ReactiveEnergyIn"] / 1000) + " kvar",
+                "ReactiveEnergyOut: " + str(data["ReactiveEnergyOut"] / 1000) + " kvar",
             ]))
             lastRealEnergyIn = realEnergyIn
             lastRealEnergyOut = realEnergyOut

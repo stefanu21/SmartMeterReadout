@@ -44,13 +44,17 @@ class LivePowerMonitor:
         self.display_hours = display_hours
         
         # Create figure and subplots
-        self.fig, (self.ax1, self.ax2) = plt.subplots(2, 1, figsize=(12, 8))
+        self.fig, (self.ax1, self.ax2) = plt.subplots(2, 1, figsize=(14, 10))
         self.fig.suptitle('Smart Meter - Live Power Monitor', fontsize=16, fontweight='bold')
         
-        # Initialize lines
-        self.line_net, = self.ax1.plot([], [], 'b-', linewidth=2, label='Net Power')
-        self.line_in, = self.ax2.plot([], [], 'r-', linewidth=1.5, label='Power In (Consumption)')
-        self.line_out, = self.ax2.plot([], [], 'g-', linewidth=1.5, label='Power Out (Feed-in)')
+        # Initialize lines for POWER OVERVIEW (all 3 in one graph)
+        self.line_net, = self.ax1.plot([], [], 'b-', linewidth=2, label='RealPower (Net)')
+        self.line_in, = self.ax1.plot([], [], 'r-', linewidth=1.5, label='RealPowerIn', alpha=0.7)
+        self.line_out, = self.ax1.plot([], [], 'g-', linewidth=1.5, label='RealPowerOut', alpha=0.7)
+        
+        # Initialize lines for ENERGY OVERVIEW
+        self.line_energy_in, = self.ax2.plot([], [], 'r-', linewidth=2, label='RealEnergyIn')
+        self.line_energy_out, = self.ax2.plot([], [], 'g-', linewidth=2, label='RealEnergyOut')
         
         # Configure axes
         self.setup_axes()
@@ -61,15 +65,17 @@ class LivePowerMonitor:
         
     def setup_axes(self):
         """Configure the plot axes."""
-        # Net Power Plot (top)
-        self.ax1.set_ylabel('Net Power (W)', fontsize=11)
+        # Power Overview Plot (top) - All 3 power values
+        self.ax1.set_ylabel('Power (W)', fontsize=11)
+        self.ax1.set_title('Power Overview', fontsize=12)
         # Legend will be set when data is plotted
         self.ax1.grid(True, alpha=0.3)
         self.ax1.axhline(y=0, color='gray', linestyle='--', linewidth=0.8, alpha=0.7)
         
-        # Power In/Out Plot (bottom)
+        # Energy Overview Plot (bottom) - Energy counters
         self.ax2.set_xlabel('Time', fontsize=11)
-        self.ax2.set_ylabel('Power (W)', fontsize=11)
+        self.ax2.set_ylabel('Energy (kWh)', fontsize=11)
+        self.ax2.set_title('Energy Counters', fontsize=12)
         # Legend will be set when data is plotted
         self.ax2.grid(True, alpha=0.3)
         
@@ -96,6 +102,13 @@ class LivePowerMonitor:
             for col in ['real_power_in', 'real_power_out', 'real_power_net']:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            
+            # Ensure energy columns exist and are numeric
+            for col in ['real_energy_in', 'real_energy_out']:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                else:
+                    df[col] = 0
             
             # Drop rows with invalid datetime
             df = df.dropna(subset=['datetime'])
@@ -128,14 +141,18 @@ class LivePowerMonitor:
             self.ax1.text(0.5, 0.5, 'Waiting for data...\nMake sure readout-smart-meter.py is running',
                          ha='center', va='center', transform=self.ax1.transAxes,
                          fontsize=14, color='red')
-            return self.line_net, self.line_in, self.line_out
+            return self.line_net, self.line_in, self.line_out, self.line_energy_in, self.line_energy_out
         
-        # Update Net Power plot
+        # Update Power Overview plot (top) - All 3 power values in one graph
         self.line_net.set_data(df['datetime'], df['real_power_net'])
-        
-        # Update Power In/Out plot
         self.line_in.set_data(df['datetime'], df['real_power_in'])
         self.line_out.set_data(df['datetime'], df['real_power_out'])
+        
+        # Update Energy Overview plot (bottom) - Energy counters in kWh
+        energy_in_kwh = df['real_energy_in'] / 1000
+        energy_out_kwh = df['real_energy_out'] / 1000
+        self.line_energy_in.set_data(df['datetime'], energy_in_kwh)
+        self.line_energy_out.set_data(df['datetime'], energy_out_kwh)
         
         # Adjust axes limits
         self.ax1.relim()
@@ -161,7 +178,7 @@ class LivePowerMonitor:
         # Update statistics
         self.update_statistics(df)
         
-        return self.line_net, self.line_in, self.line_out
+        return self.line_net, self.line_in, self.line_out, self.line_energy_in, self.line_energy_out
     
     def update_statistics(self, df):
         """Update the statistics text."""

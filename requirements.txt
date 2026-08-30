@@ -11,6 +11,9 @@ charset-normalizer
 pandas
 matplotlib
 
+# Optional: For interactive cursor tooltips on hover
+mplcursors
+
 # Note: tkinter is required for live GUI but cannot be installed via pip
 # Install it using your system package manager:
 #   Debian/Ubuntu: sudo apt-get install python3-tk

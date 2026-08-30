@@ -66,19 +66,54 @@ NC        1 │______│               │                         └───�
 
 ### Requirements
 
-Install the required packages:
+**WICHTIG:** Dieses Projekt verwendet ein Virtual Environment. Sie müssen es zuerst aktivieren!
 
+#### Schritt 1: Virtual Environment aktivieren
+
+```bash
+# Im Projektverzeichnis:
+source bin/activate
+
+# Oder falls das nicht funktioniert:
+. bin/activate
 ```
-pip3 install -r requirements.txt
+
+Nach der Aktivierung sollten Sie `(SmartMeterReadout)` vor Ihrem Prompt sehen.
+
+#### Schritt 2: Pakete installieren (falls noch nicht geschehen)
+
+```bash
+pip install -r requirements.txt
 ```
+
+#### Schritt 3: System-Pakete für GUI (optional)
+
+Für die Live-GUI:
+```bash
+# Debian/Ubuntu:
+sudo apt-get install python3-tk
+```
+
+Siehe `SYSTEM_DEPENDENCIES.md` für Details.
 
 
 ## Execution
 
+**WICHTIG:** Führen Sie alle Befehle mit aktiviertem Virtual Environment aus!
+
 ### Run in foreground (for testing)
 
-```
+```bash
+# Virtual Environment aktivieren (falls noch nicht aktiv):
+source bin/activate
+
+# Script ausführen:
 python3 readout-smart-meter.py
+```
+
+Alternativ ohne Aktivierung:
+```bash
+./bin/python3 readout-smart-meter.py
 ```
 
 ### Run as a service (Linux)

@@ -100,13 +100,20 @@ class LivePowerMonitor:
             # Drop rows with invalid datetime
             df = df.dropna(subset=['datetime'])
             
+            if df.empty:
+                return None
+            
             # Filter to show only last N hours
-            cutoff_time = datetime.now() - timedelta(hours=self.display_hours)
+            # Use the latest timestamp in the data as reference (not datetime.now())
+            latest_time = df['datetime'].max()
+            cutoff_time = latest_time - timedelta(hours=self.display_hours)
             df = df[df['datetime'] >= cutoff_time]
             
             return df
         except Exception as e:
             print(f"Error reading data: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def update_plot(self, frame):

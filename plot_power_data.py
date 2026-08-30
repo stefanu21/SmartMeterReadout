@@ -111,11 +111,18 @@ def load_data(filepath):
 
 def plot_power_overview(df, hours=24):
     """Plot RealPower (net), RealPowerIn and RealPowerOut in one graph."""
-    cutoff_time = datetime.now() - timedelta(hours=hours)
+    if df.empty:
+        print(f"No data available.")
+        return
+    
+    # Use latest timestamp in data as reference (not current time)
+    latest_time = df['datetime'].max()
+    cutoff_time = latest_time - timedelta(hours=hours)
     df_filtered = df[df['datetime'] >= cutoff_time]
     
     if df_filtered.empty:
         print(f"No data available for the last {hours} hours.")
+        print(f"Data range: {df['datetime'].min()} to {df['datetime'].max()}")
         return
     
     fig, ax = plt.subplots(figsize=(16, 8))
@@ -158,11 +165,18 @@ def plot_power_overview(df, hours=24):
 
 def plot_energy_overview(df, hours=24):
     """Plot RealEnergyIn and RealEnergyOut in one graph."""
-    cutoff_time = datetime.now() - timedelta(hours=hours)
+    if df.empty:
+        print(f"No data available.")
+        return
+    
+    # Use latest timestamp in data as reference (not current time)
+    latest_time = df['datetime'].max()
+    cutoff_time = latest_time - timedelta(hours=hours)
     df_filtered = df[df['datetime'] >= cutoff_time]
     
     if df_filtered.empty:
         print(f"No data available for the last {hours} hours.")
+        print(f"Data range: {df['datetime'].min()} to {df['datetime'].max()}")
         return
     
     # Check if energy data exists
@@ -251,7 +265,13 @@ def plot_daily_summary(df):
 
 def print_statistics(df, hours=24):
     """Print basic statistics about the power data."""
-    cutoff_time = datetime.now() - timedelta(hours=hours)
+    if df.empty:
+        print(f"No data available.")
+        return
+    
+    # Use latest timestamp in data as reference (not current time)
+    latest_time = df['datetime'].max()
+    cutoff_time = latest_time - timedelta(hours=hours)
     df_filtered = df[df['datetime'] >= cutoff_time]
     
     if df_filtered.empty:

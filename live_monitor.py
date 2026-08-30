@@ -8,6 +8,7 @@ import pandas as pd
 import matplotlib
 import os
 import sys
+import time
 
 # Try different backends in order of preference
 # We need to set backend before importing pyplot
@@ -46,6 +47,7 @@ except ImportError:
 DATA_FILE = "power_data.csv"
 UPDATE_INTERVAL = 5000  # Update every 5 seconds (in milliseconds)
 DISPLAY_HOURS = 1  # Show last N hours of data
+MAX_HISTORY_HOURS = 48  # Max hours of data to keep plotted (for scrolling back)
 
 class LivePowerMonitor:
     def __init__(self, data_file, display_hours=1):
@@ -64,6 +66,17 @@ class LivePowerMonitor:
         # Energy bars will be created in update_plot
         self.energy_bars_in = None
         self.energy_bars_out = None
+        
+        # Flag: True once the user manually zooms/scrolls, so auto-scaling stops
+        self.user_adjusted_view = False
+        # Throttling for keyboard navigation to avoid event backlog / lag
+        self._last_key_time = 0.0
+        self._key_min_interval = 0.05  # seconds between processed key events
+        # Slider widget for horizontal (time) scrolling
+        self.time_slider = None
+        # Full data range for the slider (set in update_plot)
+        self._full_xmin = None
+        self._full_xmax = None
         
         # Configure axes
         self.setup_axes()
@@ -191,11 +204,12 @@ class LivePowerMonitor:
             if df.empty:
                 return None
             
-            # Filter to show only last N hours
-            # Use the latest timestamp in the data as reference (not datetime.now())
+            # Keep a larger history so the user can scroll back in time.
+            # We plot ALL data within MAX_HISTORY_HOURS; the *view* is limited
+            # to display_hours (set in update_plot), but scrolling reveals older data.
             latest_time = df['datetime'].max()
-            cutoff_time = latest_time - timedelta(hours=self.display_hours)
-            df = df[df['datetime'] >= cutoff_time]
+            history_cutoff = latest_time - timedelta(hours=MAX_HISTORY_HOURS)
+            df = df[df['datetime'] >= history_cutoff]
             
             return df
         except Exception as e:
@@ -270,9 +284,34 @@ class LivePowerMonitor:
             # Show legend
             self.ax2.legend(loc='upper left')
         
-        # Adjust axes limits
-        self.ax1.relim()
-        self.ax1.autoscale_view()
+        # Remember the full time range of the plotted data (for the slider)
+        self._full_xmin = mdates.date2num(df['datetime'].min())
+        self._full_xmax = mdates.date2num(df['datetime'].max())
+
+        # Adjust axes limits (only if user hasn't manually zoomed/scrolled)
+        if not self.user_adjusted_view:
+            # Default view: show only the last display_hours, but ALL data is
+            # plotted so the user can scroll/pan back in time to see older values.
+            latest_time = df['datetime'].max()
+            view_start = latest_time - timedelta(hours=self.display_hours)
+            self.ax1.set_xlim(mdates.date2num(view_start),
+                              mdates.date2num(latest_time))
+
+            # Scale Y to the data within the visible (last display_hours) window
+            visible = df[df['datetime'] >= view_start]
+            if not visible.empty:
+                y_vals = pd.concat([
+                    visible['real_power_net'],
+                    visible['real_power_in'],
+                    visible['real_power_out'],
+                ])
+                ymin = float(y_vals.min())
+                ymax = float(y_vals.max())
+                margin = (ymax - ymin) * 0.1 if ymax > ymin else 10
+                self.ax1.set_ylim(ymin - margin, ymax + margin)
+
+            # Update the slider's valid range to the full data span
+            self._update_slider_range()
         
         # Add legends (only if not already present)
         if not self.ax1.get_legend():
@@ -312,6 +351,224 @@ class LivePowerMonitor:
         )
         self.stats_text.set_text(stats)
     
+    def _get_data_yrange(self, ax):
+        """Return (data_min, data_max) of all line data currently in the axes.
+
+        Returns (None, None) if there is no plotted data.
+        """
+        data_min = None
+        data_max = None
+        for line in ax.get_lines():
+            ydata = line.get_ydata()
+            if ydata is None or len(ydata) == 0:
+                continue
+            try:
+                ymin = float(np.nanmin(ydata))
+                ymax = float(np.nanmax(ydata))
+            except (ValueError, TypeError):
+                continue
+            data_min = ymin if data_min is None else min(data_min, ymin)
+            data_max = ymax if data_max is None else max(data_max, ymax)
+        return data_min, data_max
+
+    def _clamp_ypan(self, ax, new_ymin, new_ymax):
+        """Clamp a proposed Y-view so the measurement data always stays visible.
+
+        Prevents panning so far that all curves leave the visible window.
+        """
+        data_min, data_max = self._get_data_yrange(ax)
+        if data_min is None:
+            # No data yet - allow the requested range
+            return new_ymin, new_ymax
+
+        view_height = new_ymax - new_ymin
+        # The visible window must still overlap the data range.
+        # Keep at least a small margin of data in view.
+        # Lowest allowed bottom: window sits just below data_max
+        max_ymin = data_max - view_height * 0.1
+        # Highest allowed bottom: window top sits just above data_min
+        min_ymin = data_min - view_height * 0.9
+
+        clamped_ymin = max(min_ymin, min(new_ymin, max_ymin))
+        clamped_ymax = clamped_ymin + view_height
+        return clamped_ymin, clamped_ymax
+
+    def on_scroll(self, event):
+        """Handle mouse wheel scrolling for pan/zoom.
+
+        - Mouse wheel:        Scroll Y-axis up/down (pan)
+        - Shift + mouse wheel: Zoom Y-axis in/out
+        - Ctrl + mouse wheel:  Zoom X-axis in/out
+        """
+        # Only react if the cursor is inside an axes
+        ax = event.inaxes
+        if ax is None:
+            return
+
+        # Mark that the user has taken control of the view
+        self.user_adjusted_view = True
+
+        # event.button is 'up' or 'down'; event.step is +1/-1
+        step = event.step  # positive = up/away from user, negative = down/toward user
+
+        # Determine which modifier key is held
+        key = event.key  # 'shift', 'control', or None
+
+        if key == 'control':
+            # --- Zoom X-axis around the cursor position ---
+            xmin, xmax = ax.get_xlim()
+            xrange = xmax - xmin
+            # Zoom factor: scroll up zooms in (smaller range)
+            scale = 0.9 if step > 0 else 1.1
+            xdata = event.xdata if event.xdata is not None else (xmin + xmax) / 2
+            new_range = xrange * scale
+            # Keep cursor position stable
+            left_frac = (xdata - xmin) / xrange
+            new_xmin = xdata - new_range * left_frac
+            new_xmax = xdata + new_range * (1 - left_frac)
+            ax.set_xlim(new_xmin, new_xmax)
+
+        elif key == 'shift':
+            # --- Zoom Y-axis around the cursor position ---
+            ymin, ymax = ax.get_ylim()
+            yrange = ymax - ymin
+            scale = 0.9 if step > 0 else 1.1
+            ydata = event.ydata if event.ydata is not None else (ymin + ymax) / 2
+            new_range = yrange * scale
+            bottom_frac = (ydata - ymin) / yrange
+            new_ymin = ydata - new_range * bottom_frac
+            new_ymax = ydata + new_range * (1 - bottom_frac)
+            ax.set_ylim(new_ymin, new_ymax)
+
+        else:
+            # --- Scroll (pan) Y-axis up/down ---
+            ymin, ymax = ax.get_ylim()
+            yrange = ymax - ymin
+            # Move by 10% of the visible range per scroll step
+            shift = yrange * 0.1 * step
+            new_ymin, new_ymax = ymin + shift, ymax + shift
+            # Clamp so the measurement curves never leave the visible area
+            new_ymin, new_ymax = self._clamp_ypan(ax, new_ymin, new_ymax)
+            ax.set_ylim(new_ymin, new_ymax)
+
+        # Redraw the canvas to show the change
+        self.fig.canvas.draw_idle()
+
+    def on_key(self, event):
+        """Handle keyboard arrow keys for scrolling/panning.
+
+        - Up / Down arrows:    Scroll Y-axis up/down
+        - Left / Right arrows:  Scroll X-axis (time) left/right
+        - '+' / '-':            Zoom Y-axis in/out
+        - 'r':                  Reset view (re-enable auto-scaling)
+        """
+        # Reset view: return control to auto-scaling
+        if event.key == 'r':
+            self.user_adjusted_view = False
+            self.fig.canvas.draw_idle()
+            return
+
+        # Only handle navigation keys; ignore everything else early
+        if event.key not in ('up', 'down', 'left', 'right', '+', '=', '-'):
+            return
+
+        # Throttle: drop key events that arrive faster than we can redraw.
+        # This prevents an event backlog that makes the plot keep moving
+        # ("running on") after the key is released.
+        now = time.monotonic()
+        if now - self._last_key_time < self._key_min_interval:
+            return
+        self._last_key_time = now
+
+        # Use the power axis (ax1) as the target for keyboard navigation
+        ax = self.ax1
+
+        # Mark that the user has taken control of the view
+        self.user_adjusted_view = True
+
+        if event.key == 'up':
+            # Scroll Y-axis up
+            ymin, ymax = ax.get_ylim()
+            shift = (ymax - ymin) * 0.1
+            new_ymin, new_ymax = self._clamp_ypan(ax, ymin + shift, ymax + shift)
+            ax.set_ylim(new_ymin, new_ymax)
+
+        elif event.key == 'down':
+            # Scroll Y-axis down
+            ymin, ymax = ax.get_ylim()
+            shift = (ymax - ymin) * 0.1
+            new_ymin, new_ymax = self._clamp_ypan(ax, ymin - shift, ymax - shift)
+            ax.set_ylim(new_ymin, new_ymax)
+
+        elif event.key == 'right':
+            # Scroll X-axis (time) forward
+            xmin, xmax = ax.get_xlim()
+            shift = (xmax - xmin) * 0.1
+            ax.set_xlim(xmin + shift, xmax + shift)
+            self._sync_slider(xmin + shift)
+
+        elif event.key == 'left':
+            # Scroll X-axis (time) backward
+            xmin, xmax = ax.get_xlim()
+            shift = (xmax - xmin) * 0.1
+            ax.set_xlim(xmin - shift, xmax - shift)
+            self._sync_slider(xmin - shift)
+
+        elif event.key in ('+', '='):
+            # Zoom Y-axis in
+            ymin, ymax = ax.get_ylim()
+            center = (ymin + ymax) / 2
+            half = (ymax - ymin) / 2 * 0.9
+            ax.set_ylim(center - half, center + half)
+
+        elif event.key == '-':
+            # Zoom Y-axis out
+            ymin, ymax = ax.get_ylim()
+            center = (ymin + ymax) / 2
+            half = (ymax - ymin) / 2 * 1.1
+            ax.set_ylim(center - half, center + half)
+
+        self.fig.canvas.draw_idle()
+
+    def _update_slider_range(self):
+        """Update the time slider's min/max to match the full data range."""
+        if self.time_slider is None or self._full_xmin is None:
+            return
+        if self._full_xmax <= self._full_xmin:
+            return
+        # Adjust the slider's underlying range and current axes position
+        self.time_slider.valmin = self._full_xmin
+        self.time_slider.valmax = self._full_xmax
+        self.time_slider.ax.set_xlim(self._full_xmin, self._full_xmax)
+        # Keep the slider handle at the current view start
+        xmin, _ = self.ax1.get_xlim()
+        val = max(self._full_xmin, min(xmin, self._full_xmax))
+        self.time_slider.eventson = False
+        self.time_slider.set_val(val)
+        self.time_slider.eventson = True
+
+    def _sync_slider(self, new_xmin):
+        """Update the time slider position without triggering its callback."""
+        if self.time_slider is not None and self._full_xmin is not None:
+            # Clamp to valid range
+            val = max(self._full_xmin, min(new_xmin, self._full_xmax))
+            # eventson=False prevents recursive callback
+            self.time_slider.eventson = False
+            self.time_slider.set_val(val)
+            self.time_slider.eventson = True
+
+    def on_slider_change(self, val):
+        """Handle time slider movement: pan the X-axis to the selected start time."""
+        if self._full_xmin is None:
+            return
+        # Current visible width
+        xmin, xmax = self.ax1.get_xlim()
+        width = xmax - xmin
+        # Set new window starting at slider value
+        self.user_adjusted_view = True
+        self.ax1.set_xlim(val, val + width)
+        self.fig.canvas.draw_idle()
+
     def start(self, interval=UPDATE_INTERVAL):
         """Start the live monitor."""
         # Enable interactive navigation toolbar
@@ -326,14 +583,30 @@ class LivePowerMonitor:
             cache_frame_data=False
         )
         
-        # Enable interactive pan/zoom
-        # Left mouse: Pan
-        # Right mouse: Zoom rectangle
-        # Scroll wheel: Zoom in/out on Y-axis
-        # Toolbar buttons: Zoom, Pan, Home, Save
-        
+        # Enable interactive pan/zoom via mouse wheel
+        # Mouse wheel: Scroll Y-axis up/down
+        # Shift+wheel: Zoom Y-axis in/out
+        # Ctrl+wheel: Zoom X-axis in/out
+        self.fig.canvas.mpl_connect('scroll_event', self.on_scroll)
+
+        # Enable keyboard arrow-key scrolling
+        self.fig.canvas.mpl_connect('key_press_event', self.on_key)
+
         plt.tight_layout()
-        plt.subplots_adjust(bottom=0.08)  # Make room for statistics
+        # Leave room at the bottom for statistics text AND the time slider
+        plt.subplots_adjust(bottom=0.16)
+
+        # --- Create a horizontal scrollbar (Slider) for time navigation ---
+        from matplotlib.widgets import Slider
+        # Position: [left, bottom, width, height] in figure coordinates
+        slider_ax = self.fig.add_axes([0.15, 0.02, 0.70, 0.03])
+        # Initial range is a placeholder (0..1); it gets updated once data loads
+        self.time_slider = Slider(
+            slider_ax, 'Zeit', 0.0, 1.0, valinit=0.0, valstep=None
+        )
+        self.time_slider.on_changed(self.on_slider_change)
+        # Hide the numeric value label (it's a matplotlib date number, not useful)
+        self.time_slider.valtext.set_visible(False)
         
         # Show instructions
         print("\n" + "="*70)

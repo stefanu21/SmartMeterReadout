@@ -254,6 +254,12 @@ measurementCounter = 0  # Counter for logging interval
 
 while not signalHandler.shutdown_requested():
     try:
+        # If the GUI monitor was started and has been closed by the user,
+        # shut down the main program as well.
+        if gui_process is not None and gui_process.poll() is not None:
+            log("GUI window closed - shutting down data collection.")
+            break
+
         data = ser.read(size=FRAME_LENGTH)
 
         if data == b"":
@@ -391,14 +397,18 @@ ser.close()
 
 # Cleanup GUI process if it was started
 if gui_process is not None:
-    try:
-        log("Stopping GUI monitor...")
-        gui_process.terminate()
-        gui_process.wait(timeout=5)
-        log("GUI monitor stopped")
-    except Exception as e:
-        log(f"Error stopping GUI monitor: {str(e)}", True)
+    # If the GUI already exited on its own (user closed the window), skip terminate
+    if gui_process.poll() is not None:
+        log("GUI monitor already closed")
+    else:
         try:
-            gui_process.kill()
-        except:
-            pass
+            log("Stopping GUI monitor...")
+            gui_process.terminate()
+            gui_process.wait(timeout=5)
+            log("GUI monitor stopped")
+        except Exception as e:
+            log(f"Error stopping GUI monitor: {str(e)}", True)
+            try:
+                gui_process.kill()
+            except:
+                pass

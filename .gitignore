@@ -1,1 +1,23 @@
 .idea
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+bin/
+lib/
+lib64
+share/
+pyvenv.cfg
+include/
+
+# Data and logs
+*.log
+power_data.csv
+power_data_demo.csv
+
+# Generated plots
+plots/

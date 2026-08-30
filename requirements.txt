@@ -3,7 +3,10 @@ cryptography
 gurux_dlms
 pyserial
 lxml
-# Installing cchardet in Python 3.11+ will result in the error "longintrepr.h: No such file or directory".
-# As long as the author has not fixed it, installing cython solves the problem.
-cython
-cchardet
+# charset-normalizer is used for better performance with BeautifulSoup.
+# It replaces cchardet which is not compatible with Python 3.12+.
+charset-normalizer
+
+# For data visualization
+pandas
+matplotlib

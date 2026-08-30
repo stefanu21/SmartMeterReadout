@@ -22,16 +22,92 @@ def load_data(filepath):
         print(f"Make sure the smart meter readout script is running and collecting data.")
         sys.exit(1)
     
-    df = pd.read_csv(filepath)
-    df['datetime'] = pd.to_datetime(df['datetime'])
-    
-    # Check if energy columns exist (for backward compatibility)
-    if 'real_energy_in' not in df.columns:
-        print("Warning: Energy data not found in CSV. Only power data will be plotted.")
-        df['real_energy_in'] = 0
-        df['real_energy_out'] = 0
-    
-    return df
+    try:
+        # First, check the header to determine format
+        with open(filepath, 'r') as f:
+            header = f.readline().strip()
+        
+        # Determine if we have energy columns
+        has_energy = 'real_energy_in' in header
+        
+        if has_energy:
+            # New format with energy columns
+            df = pd.read_csv(filepath)
+        else:
+            # Old format without energy columns - add them as zeros
+            df = pd.read_csv(filepath)
+            df['real_energy_in'] = 0
+            df['real_energy_out'] = 0
+        
+        df['datetime'] = pd.to_datetime(df['datetime'])
+        
+        # Handle mixed format files (old rows might not have all columns)
+        # Fill NaN values with 0 for energy columns
+        if 'real_energy_in' in df.columns:
+            df['real_energy_in'] = df['real_energy_in'].fillna(0)
+        if 'real_energy_out' in df.columns:
+            df['real_energy_out'] = df['real_energy_out'].fillna(0)
+        
+        return df
+        
+    except Exception as e:
+        print(f"Error loading data: {e}")
+        print("\nTrying to fix mixed format CSV...")
+        
+        # Try to handle mixed format by reading line by line
+        try:
+            data_rows = []
+            with open(filepath, 'r') as f:
+                header_line = f.readline().strip()
+                headers = header_line.split(',')
+                
+                # Determine column count
+                expected_cols = len(headers)
+                has_energy = 'real_energy_in' in headers
+                
+                for line_num, line in enumerate(f, start=2):
+                    parts = line.strip().split(',')
+                    
+                    # Handle rows with fewer columns (old format)
+                    if len(parts) < expected_cols:
+                        # Add missing energy columns as 0
+                        while len(parts) < expected_cols:
+                            parts.append('0')
+                    
+                    # Handle rows with too many columns (shouldn't happen but just in case)
+                    elif len(parts) > expected_cols:
+                        parts = parts[:expected_cols]
+                    
+                    data_rows.append(parts)
+            
+            # Create DataFrame
+            df = pd.DataFrame(data_rows, columns=headers)
+            
+            # Convert to proper types
+            df['timestamp'] = pd.to_numeric(df['timestamp'], errors='coerce')
+            df['datetime'] = pd.to_datetime(df['datetime'], errors='coerce')
+            df['real_power_in'] = pd.to_numeric(df['real_power_in'], errors='coerce').fillna(0)
+            df['real_power_out'] = pd.to_numeric(df['real_power_out'], errors='coerce').fillna(0)
+            df['real_power_net'] = pd.to_numeric(df['real_power_net'], errors='coerce').fillna(0)
+            
+            if has_energy:
+                df['real_energy_in'] = pd.to_numeric(df['real_energy_in'], errors='coerce').fillna(0)
+                df['real_energy_out'] = pd.to_numeric(df['real_energy_out'], errors='coerce').fillna(0)
+            else:
+                df['real_energy_in'] = 0
+                df['real_energy_out'] = 0
+            
+            # Remove rows with invalid datetime
+            df = df.dropna(subset=['datetime'])
+            
+            print(f"✓ Successfully loaded {len(df)} data points")
+            return df
+            
+        except Exception as e2:
+            print(f"Error: Could not load data: {e2}")
+            print("\nThe CSV file may be corrupted or in an incompatible format.")
+            print("You may need to regenerate the data file.")
+            sys.exit(1)
 
 def plot_power_overview(df, hours=24):
     """Plot RealPower (net), RealPowerIn and RealPowerOut in one graph."""

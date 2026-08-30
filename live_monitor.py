@@ -79,11 +79,26 @@ class LivePowerMonitor:
             return None
         
         try:
-            df = pd.read_csv(self.data_file)
+            # Check if file has energy columns
+            with open(self.data_file, 'r') as f:
+                header = f.readline().strip()
+            
+            has_energy = 'real_energy_in' in header
+            
+            # Read CSV - handle potential format issues
+            df = pd.read_csv(self.data_file, on_bad_lines='skip')
             if df.empty:
                 return None
             
-            df['datetime'] = pd.to_datetime(df['datetime'])
+            df['datetime'] = pd.to_datetime(df['datetime'], errors='coerce')
+            
+            # Ensure power columns exist and are numeric
+            for col in ['real_power_in', 'real_power_out', 'real_power_net']:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            
+            # Drop rows with invalid datetime
+            df = df.dropna(subset=['datetime'])
             
             # Filter to show only last N hours
             cutoff_time = datetime.now() - timedelta(hours=self.display_hours)

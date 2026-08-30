@@ -166,6 +166,13 @@ parser.add_argument('--tasmota-devices', type=str,
                         '(default: built-in config in tasmota_monitor.py)')
 parser.add_argument('--tasmota-interval', type=float, default=5,
                    help='Seconds between Tasmota poll cycles (default: 5)')
+parser.add_argument('--web', action='store_true',
+                   help='Start web-based live monitor in the background (see web_monitor.py). '
+                        'Alternative to --gui for headless servers / remote viewing.')
+parser.add_argument('--web-host', type=str, default='0.0.0.0',
+                   help='Host/IP for the web monitor to bind to (default: 0.0.0.0 - reachable from the LAN)')
+parser.add_argument('--web-port', type=int, default=8080,
+                   help='Port for the web monitor (default: 8080)')
 parser.add_argument('--log-interval', type=int, default=LOGGING_INTERVAL, 
                    help=f'Log every N-th measurement (default: {LOGGING_INTERVAL}). '
                         f'Smart meter sends ~every 5 sec. Examples: 1=5sec, 12=1min, 60=5min')
@@ -262,6 +269,31 @@ if args.tasmota:
             log(f"Warning: Tasmota monitor script not found at {tasmota_script}", True)
     except Exception as e:
         log(f"Failed to start Tasmota monitor: {str(e)}", True)
+
+# Start web-based live monitor if requested (alternative to --gui)
+web_process = None
+if args.web:
+    try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        web_script = os.path.join(script_dir, "web_monitor.py")
+
+        if os.path.exists(web_script):
+            web_cmd = [
+                sys.executable,
+                web_script,
+                '--host', args.web_host,
+                '--port', str(args.web_port),
+                '--hours', str(args.gui_hours),
+                '--file', DATA_FILE,
+                '--tasmota-file', os.path.join(script_dir, "tasmota_power.csv"),
+            ]
+            log(f"Starting web monitor on http://{args.web_host}:{args.web_port}/ ...")
+            web_process = subprocess.Popen(web_cmd)
+            log(f"Web monitor started with PID {web_process.pid}")
+        else:
+            log(f"Warning: Web monitor script not found at {web_script}", True)
+    except Exception as e:
+        log(f"Failed to start web monitor: {str(e)}", True)
 
 signalHandler = SignalHandler()
 
@@ -483,5 +515,22 @@ if tasmota_process is not None:
             log(f"Error stopping Tasmota monitor: {str(e)}", True)
             try:
                 tasmota_process.kill()
+            except:
+                pass
+
+# Cleanup web monitor process if it was started
+if web_process is not None:
+    if web_process.poll() is not None:
+        log("Web monitor already stopped")
+    else:
+        try:
+            log("Stopping web monitor...")
+            web_process.terminate()
+            web_process.wait(timeout=5)
+            log("Web monitor stopped")
+        except Exception as e:
+            log(f"Error stopping web monitor: {str(e)}", True)
+            try:
+                web_process.kill()
             except:
                 pass

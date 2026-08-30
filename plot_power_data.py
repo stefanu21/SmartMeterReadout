@@ -79,11 +79,16 @@ def clamp_ylim_nonnegative(ax, values):
         ax.set_ylim(max(0, ymin), ymax)
 
 def load_data(filepath):
-    """Load power data from CSV file."""
+    """Load power data from CSV file.
+
+    Raises FileNotFoundError if the file doesn't exist, or ValueError if it
+    cannot be parsed even after attempting to fix mixed-format rows. Callers
+    that want the old CLI behavior (print + exit) should catch these in
+    main()/entry points; this function itself never calls sys.exit(), so it
+    is safe to reuse from long-running processes (e.g. web_monitor.py).
+    """
     if not os.path.exists(filepath):
-        print(f"Error: Data file '{filepath}' not found.")
-        print(f"Make sure the smart meter readout script is running and collecting data.")
-        sys.exit(1)
+        raise FileNotFoundError(f"Data file '{filepath}' not found.")
     
     try:
         # First, check the header to determine format
@@ -167,10 +172,10 @@ def load_data(filepath):
             return df
             
         except Exception as e2:
-            print(f"Error: Could not load data: {e2}")
-            print("\nThe CSV file may be corrupted or in an incompatible format.")
-            print("You may need to regenerate the data file.")
-            sys.exit(1)
+            raise ValueError(
+                f"Could not load data: {e2}. "
+                "The CSV file may be corrupted or in an incompatible format."
+            ) from e2
 
 def plot_power_overview(df, hours=24, tasmota_file=None):
     """Plot RealPower (net), RealPowerIn and RealPowerOut in one graph."""
@@ -750,7 +755,16 @@ def main():
     tasmota_file = os.path.join(script_dir, args.tasmota_file)
     
     print(f"Loading data from: {data_file}")
-    df = load_data(data_file)
+    try:
+        df = load_data(data_file)
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        print("Make sure the smart meter readout script is running and collecting data.")
+        sys.exit(1)
+    except ValueError as e:
+        print(f"Error: {e}")
+        print("You may need to regenerate the data file.")
+        sys.exit(1)
     print(f"Loaded {len(df)} data points")
     print(f"Time range: {df['datetime'].min()} to {df['datetime'].max()}")
     

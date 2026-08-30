@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Meter - Web Monitor</title>
+<script src="{{ url_for('static', filename='plotly.min.js') }}"></script>
+<style>
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    margin: 0;
+    padding: 0 16px 16px 16px;
+    background: #1e1e1e;
+    color: #ddd;
+  }
+  h1 {
+    font-size: 1.3em;
+    font-weight: 600;
+    padding: 12px 0 4px 0;
+    margin: 0;
+  }
+  #stats {
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 0.9em;
+    padding: 6px 0 10px 0;
+    color: #9cdcfe;
+  }
+  #stats.stale {
+    color: #e06c75;
+  }
+  #power-chart {
+    width: 100%;
+    height: 60vh;
+  }
+  #energy-chart {
+    width: 100%;
+    height: 30vh;
+  }
+  #controls {
+    padding: 8px 0;
+  }
+  button {
+    background: #2d2d2d;
+    color: #ddd;
+    border: 1px solid #555;
+    border-radius: 4px;
+    padding: 6px 14px;
+    cursor: pointer;
+    font-size: 0.9em;
+  }
+  button:hover {
+    background: #3d3d3d;
+  }
+  #error-banner {
+    display: none;
+    background: #5a1e1e;
+    color: #ffb3b3;
+    padding: 8px 12px;
+    border-radius: 4px;
+    margin: 8px 0;
+    font-family: monospace;
+    font-size: 0.9em;
+  }
+</style>
+</head>
+<body>
+  <h1>Smart Meter - Live Power Monitor (Web)</h1>
+  <div id="stats">Loading...</div>
+  <div id="error-banner"></div>
+  <div id="controls">
+    <button id="reset-view-btn">Ansicht zurücksetzen</button>
+  </div>
+  <div id="power-chart"></div>
+  <div id="energy-chart"></div>
+
+  <script>
+    const REFRESH_MS = {{ refresh_ms }};
+    const DISPLAY_HOURS = {{ display_hours }};
+
+    const powerDiv = document.getElementById('power-chart');
+    const energyDiv = document.getElementById('energy-chart');
+    const statsDiv = document.getElementById('stats');
+    const errorBanner = document.getElementById('error-banner');
+
+    // Fixed trace indices for the smart-meter power lines; Tasmota device
+    // traces are appended dynamically and tracked in this map.
+    const POWER_TRACE_NET = 0, POWER_TRACE_IN = 1, POWER_TRACE_OUT = 2;
+    const tasmotaTraceIndex = {}; // deviceName -> trace index in powerDiv
+
+    let powerInitialized = false;
+    let energyInitialized = false;
+
+    function basePowerLayout() {
+      return {
+        paper_bgcolor: '#1e1e1e',
+        plot_bgcolor: '#1e1e1e',
+        font: { color: '#ddd' },
+        margin: { t: 20, r: 20, l: 60, b: 40 },
+        xaxis: { type: 'date', gridcolor: '#333' },
+        yaxis: { title: 'Power (W)', gridcolor: '#333', rangemode: 'tozero' },
+        hovermode: 'closest',
+        legend: { orientation: 'h', y: 1.12 },
+        shapes: [{
+          type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: 0, y1: 0,
+          line: { color: '#888', dash: 'dash', width: 1 }
+        }],
+      };
+    }
+
+    function baseEnergyLayout() {
+      return {
+        paper_bgcolor: '#1e1e1e',
+        plot_bgcolor: '#1e1e1e',
+        font: { color: '#ddd' },
+        margin: { t: 10, r: 20, l: 60, b: 60 },
+        xaxis: {
+          type: 'date', gridcolor: '#333',
+          rangeslider: { visible: true, bgcolor: '#2a2a2a' },
+        },
+        yaxis: { title: 'Energie / 15min (kWh)', gridcolor: '#333' },
+        barmode: 'group',
+        legend: { orientation: 'h', y: 1.15 },
+      };
+    }
+
+    function hoverTemplate(unit) {
+      return '%{fullData.name}<br>%{x|%H:%M:%S}<br>%{y:.1f} ' + unit + '<extra></extra>';
+    }
+
+    function renderPower(data) {
+      const traces = [
+        { x: data.power.net.x, y: data.power.net.y, name: 'RealPower (Net)',
+          mode: 'lines', line: { color: '#3b82f6', width: 2 },
+          hovertemplate: hoverTemplate('W') },
+        { x: data.power.in.x, y: data.power.in.y, name: 'RealPowerIn',
+          mode: 'lines', line: { color: '#ef4444', width: 1.5 },
+          hovertemplate: hoverTemplate('W') },
+        { x: data.power.out.x, y: data.power.out.y, name: 'RealPowerOut',
+          mode: 'lines', line: { color: '#22c55e', width: 1.5 },
+          hovertemplate: hoverTemplate('W') },
+      ];
+
+      const deviceNames = Object.keys(data.tasmota || {});
+      let newDevicesAdded = false;
+      deviceNames.forEach((name) => {
+        if (!(name in tasmotaTraceIndex)) {
+          tasmotaTraceIndex[name] = traces.length + (powerInitialized ? 0 : 0);
+          newDevicesAdded = true;
+        }
+      });
+
+      if (!powerInitialized) {
+        deviceNames.forEach((name) => {
+          const series = data.tasmota[name];
+          const color = (data.tasmota_colors || {})[name] || '#a855f7';
+          tasmotaTraceIndex[name] = traces.length;
+          traces.push({
+            x: series.x, y: series.y, name: name,
+            mode: 'lines', line: { color: color, width: 1.5 },
+            hovertemplate: hoverTemplate('W'),
+          });
+        });
+
+        const layout = basePowerLayout();
+        const lastX = data.power.net.x.length ? data.power.net.x[data.power.net.x.length - 1] : null;
+        if (lastX) {
+          const end = new Date(lastX);
+          const start = new Date(end.getTime() - DISPLAY_HOURS * 3600 * 1000);
+          layout.xaxis.range = [start.toISOString(), end.toISOString()];
+        }
+        Plotly.newPlot(powerDiv, traces, layout, { responsive: true, scrollZoom: true });
+        powerInitialized = true;
+        return;
+      }
+
+      // Subsequent updates: only touch trace data, never layout, so the
+      // user's current zoom/pan state (if any) is preserved.
+      const updateX = [data.power.net.x, data.power.in.x, data.power.out.x];
+      const updateY = [data.power.net.y, data.power.in.y, data.power.out.y];
+      const indices = [POWER_TRACE_NET, POWER_TRACE_IN, POWER_TRACE_OUT];
+
+      deviceNames.forEach((name) => {
+        const series = data.tasmota[name];
+        if (name in tasmotaTraceIndex && tasmotaTraceIndex[name] < powerDiv.data.length) {
+          updateX.push(series.x);
+          updateY.push(series.y);
+          indices.push(tasmotaTraceIndex[name]);
+        }
+      });
+
+      Plotly.update(powerDiv, { x: updateX, y: updateY }, {}, indices);
+
+      // Add any brand-new devices as new traces (rare - only when a device
+      // is first seen).
+      deviceNames.forEach((name) => {
+        if (tasmotaTraceIndex[name] >= powerDiv.data.length) {
+          const series = data.tasmota[name];
+          const color = (data.tasmota_colors || {})[name] || '#a855f7';
+          Plotly.addTraces(powerDiv, {
+            x: series.x, y: series.y, name: name,
+            mode: 'lines', line: { color: color, width: 1.5 },
+            hovertemplate: hoverTemplate('W'),
+          });
+        }
+      });
+    }
+
+    function renderEnergy(data) {
+      const e = data.energy;
+      const traces = [
+        { x: e.x, y: e.energy_in_kwh, name: 'Energy In', type: 'bar',
+          marker: { color: '#ef4444', opacity: 0.8 },
+          hovertemplate: hoverTemplate('kWh') },
+        { x: e.x, y: e.energy_out_kwh, name: 'Energy Out', type: 'bar',
+          marker: { color: '#22c55e', opacity: 0.8 },
+          hovertemplate: hoverTemplate('kWh') },
+      ];
+
+      if (!energyInitialized) {
+        Plotly.newPlot(energyDiv, traces, baseEnergyLayout(), { responsive: true });
+        energyInitialized = true;
+        return;
+      }
+
+      Plotly.update(energyDiv, { x: [e.x, e.x], y: [e.energy_in_kwh, e.energy_out_kwh] }, {}, [0, 1]);
+    }
+
+    function renderStats(stats) {
+      statsDiv.classList.remove('stale');
+      statsDiv.textContent =
+        `Last Update: ${stats.last_update}  |  ` +
+        `Current: ${stats.current_power.toFixed(0)} W  |  ` +
+        `Avg: ${stats.avg_power.toFixed(0)} W  |  ` +
+        `Max: ${stats.max_power.toFixed(0)} W  |  ` +
+        `Min: ${stats.min_power.toFixed(0)} W  |  ` +
+        `Points: ${stats.points}`;
+    }
+
+    async function refresh() {
+      try {
+        const resp = await fetch('/api/data');
+        if (!resp.ok) {
+          const body = await resp.json().catch(() => ({}));
+          throw new Error(body.error || `HTTP ${resp.status}`);
+        }
+        const data = await resp.json();
+        errorBanner.style.display = 'none';
+        renderPower(data);
+        renderEnergy(data);
+        renderStats(data.stats);
+      } catch (err) {
+        errorBanner.style.display = 'block';
+        errorBanner.textContent = 'Fehler beim Laden der Daten: ' + err.message;
+        statsDiv.classList.add('stale');
+      }
+    }
+
+    document.getElementById('reset-view-btn').addEventListener('click', () => {
+      if (powerInitialized) {
+        Plotly.relayout(powerDiv, { 'xaxis.autorange': true, 'yaxis.autorange': true });
+      }
+      if (energyInitialized) {
+        Plotly.relayout(energyDiv, { 'xaxis.autorange': true, 'yaxis.autorange': true });
+      }
+    });
+
+    refresh();
+    setInterval(refresh, REFRESH_MS);
+  </script>
+</body>
+</html>

@@ -164,7 +164,7 @@ def plot_power_overview(df, hours=24):
     plt.close()
 
 def plot_energy_overview(df, hours=24):
-    """Plot RealEnergyIn and RealEnergyOut in one graph."""
+    """Plot RealEnergyIn and RealEnergyOut as bar chart with 15-minute intervals."""
     if df.empty:
         print(f"No data available.")
         return
@@ -172,7 +172,7 @@ def plot_energy_overview(df, hours=24):
     # Use latest timestamp in data as reference (not current time)
     latest_time = df['datetime'].max()
     cutoff_time = latest_time - timedelta(hours=hours)
-    df_filtered = df[df['datetime'] >= cutoff_time]
+    df_filtered = df[df['datetime'] >= cutoff_time].copy()
     
     if df_filtered.empty:
         print(f"No data available for the last {hours} hours.")
@@ -184,33 +184,58 @@ def plot_energy_overview(df, hours=24):
         print("Warning: No energy data available. Skipping energy plot.")
         return
     
+    # Calculate energy consumption per 15-minute interval
+    # Energy counters are cumulative, so we need the difference
+    df_filtered = df_filtered.sort_values('datetime')
+    df_filtered['energy_in_diff'] = df_filtered['real_energy_in'].diff()
+    df_filtered['energy_out_diff'] = df_filtered['real_energy_out'].diff()
+    
+    # Remove negative differences (can happen on counter resets)
+    df_filtered.loc[df_filtered['energy_in_diff'] < 0, 'energy_in_diff'] = 0
+    df_filtered.loc[df_filtered['energy_out_diff'] < 0, 'energy_out_diff'] = 0
+    
+    # Group by 15-minute intervals
+    df_filtered['time_15min'] = df_filtered['datetime'].dt.floor('15min')
+    energy_15min = df_filtered.groupby('time_15min').agg({
+        'energy_in_diff': 'sum',
+        'energy_out_diff': 'sum'
+    }).reset_index()
+    
+    # Convert Wh to kWh
+    energy_15min['energy_in_kwh'] = energy_15min['energy_in_diff'] / 1000
+    energy_15min['energy_out_kwh'] = energy_15min['energy_out_diff'] / 1000
+    
     fig, ax = plt.subplots(figsize=(16, 8))
     
-    # Convert Wh to kWh for better readability
-    energy_in_kwh = df_filtered['real_energy_in'] / 1000
-    energy_out_kwh = df_filtered['real_energy_out'] / 1000
+    # Create bar chart
+    bar_width = 0.35
+    x = range(len(energy_15min))
     
-    # Plot both energy values
-    ax.plot(df_filtered['datetime'], energy_in_kwh, 
-            label='RealEnergyIn (Consumed)', linewidth=2, color='red')
-    ax.plot(df_filtered['datetime'], energy_out_kwh, 
-            label='RealEnergyOut (Fed-in)', linewidth=2, color='green')
+    # Bars for energy in (consumption)
+    bars_in = ax.bar([i - bar_width/2 for i in x], energy_15min['energy_in_kwh'], 
+                     bar_width, label='Energy In (Consumption)', color='red', alpha=0.7)
+    
+    # Bars for energy out (feed-in)
+    bars_out = ax.bar([i + bar_width/2 for i in x], energy_15min['energy_out_kwh'], 
+                      bar_width, label='Energy Out (Feed-in)', color='green', alpha=0.7)
     
     ax.set_xlabel('Time', fontsize=12)
-    ax.set_ylabel('Energy (kWh)', fontsize=12)
-    ax.set_title(f'Energy Counters - Last {hours} Hours', fontsize=14, fontweight='bold')
+    ax.set_ylabel('Energy per 15 min (kWh)', fontsize=12)
+    ax.set_title(f'Energy Consumption - 15 Minute Intervals (Last {hours} Hours)', 
+                 fontsize=14, fontweight='bold')
     ax.legend(loc='upper left', fontsize=11)
-    ax.grid(True, alpha=0.3)
+    ax.grid(True, alpha=0.3, axis='y')
     
     # Format x-axis
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-    if hours <= 2:
-        ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=15))
-    elif hours <= 12:
-        ax.xaxis.set_major_locator(mdates.HourLocator(interval=1))
-    else:
-        ax.xaxis.set_major_locator(mdates.HourLocator(interval=2))
-    plt.xticks(rotation=45)
+    ax.set_xticks(x)
+    labels = [t.strftime('%H:%M') for t in energy_15min['time_15min']]
+    ax.set_xticklabels(labels, rotation=45, ha='right')
+    
+    # Only show every nth label if too many
+    if len(labels) > 20:
+        for i, label in enumerate(ax.xaxis.get_ticklabels()):
+            if i % 2 != 0:
+                label.set_visible(False)
     
     plt.tight_layout()
     
@@ -342,14 +367,14 @@ def plot_power_overview_interactive(df, hours=24):
     plt.show(block=False)
 
 def plot_energy_overview_interactive(df, hours=24):
-    """Interactive version of energy overview plot."""
+    """Interactive version of energy overview plot - bar chart with 15-min intervals."""
     if df.empty:
         print(f"No data available.")
         return
     
     latest_time = df['datetime'].max()
     cutoff_time = latest_time - timedelta(hours=hours)
-    df_filtered = df[df['datetime'] >= cutoff_time]
+    df_filtered = df[df['datetime'] >= cutoff_time].copy()
     
     if df_filtered.empty:
         print(f"No data available for the last {hours} hours.")
@@ -359,23 +384,53 @@ def plot_energy_overview_interactive(df, hours=24):
         print("Warning: No energy data available.")
         return
     
+    # Calculate energy consumption per 15-minute interval
+    df_filtered = df_filtered.sort_values('datetime')
+    df_filtered['energy_in_diff'] = df_filtered['real_energy_in'].diff()
+    df_filtered['energy_out_diff'] = df_filtered['real_energy_out'].diff()
+    
+    # Remove negative differences
+    df_filtered.loc[df_filtered['energy_in_diff'] < 0, 'energy_in_diff'] = 0
+    df_filtered.loc[df_filtered['energy_out_diff'] < 0, 'energy_out_diff'] = 0
+    
+    # Group by 15-minute intervals
+    df_filtered['time_15min'] = df_filtered['datetime'].dt.floor('15min')
+    energy_15min = df_filtered.groupby('time_15min').agg({
+        'energy_in_diff': 'sum',
+        'energy_out_diff': 'sum'
+    }).reset_index()
+    
+    # Convert Wh to kWh
+    energy_15min['energy_in_kwh'] = energy_15min['energy_in_diff'] / 1000
+    energy_15min['energy_out_kwh'] = energy_15min['energy_out_diff'] / 1000
+    
     fig, ax = plt.subplots(figsize=(16, 8))
     
-    energy_in_kwh = df_filtered['real_energy_in'] / 1000
-    energy_out_kwh = df_filtered['real_energy_out'] / 1000
+    # Create bar chart
+    bar_width = 0.35
+    x = range(len(energy_15min))
     
-    ax.plot(df_filtered['datetime'], energy_in_kwh, 
-            label='RealEnergyIn (Consumed)', linewidth=2, color='red')
-    ax.plot(df_filtered['datetime'], energy_out_kwh, 
-            label='RealEnergyOut (Fed-in)', linewidth=2, color='green')
+    bars_in = ax.bar([i - bar_width/2 for i in x], energy_15min['energy_in_kwh'], 
+                     bar_width, label='Energy In (Consumption)', color='red', alpha=0.7)
+    bars_out = ax.bar([i + bar_width/2 for i in x], energy_15min['energy_out_kwh'], 
+                      bar_width, label='Energy Out (Feed-in)', color='green', alpha=0.7)
     
     ax.set_xlabel('Time', fontsize=12)
-    ax.set_ylabel('Energy (kWh)', fontsize=12)
-    ax.set_title(f'Energy Counters - Last {hours} Hours (INTERACTIVE)', fontsize=14, fontweight='bold')
+    ax.set_ylabel('Energy per 15 min (kWh)', fontsize=12)
+    ax.set_title(f'Energy Consumption - 15 Min Intervals (Last {hours}h) (INTERACTIVE)', 
+                 fontsize=14, fontweight='bold')
     ax.legend(loc='upper left', fontsize=11)
-    ax.grid(True, alpha=0.3)
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-    plt.xticks(rotation=45)
+    ax.grid(True, alpha=0.3, axis='y')
+    
+    ax.set_xticks(x)
+    labels = [t.strftime('%H:%M') for t in energy_15min['time_15min']]
+    ax.set_xticklabels(labels, rotation=45, ha='right')
+    
+    if len(labels) > 20:
+        for i, label in enumerate(ax.xaxis.get_ticklabels()):
+            if i % 2 != 0:
+                label.set_visible(False)
+    
     plt.tight_layout()
     plt.show()
 

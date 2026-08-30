@@ -52,9 +52,9 @@ class LivePowerMonitor:
         self.line_in, = self.ax1.plot([], [], 'r-', linewidth=1.5, label='RealPowerIn', alpha=0.7)
         self.line_out, = self.ax1.plot([], [], 'g-', linewidth=1.5, label='RealPowerOut', alpha=0.7)
         
-        # Initialize lines for ENERGY OVERVIEW
-        self.line_energy_in, = self.ax2.plot([], [], 'r-', linewidth=2, label='RealEnergyIn')
-        self.line_energy_out, = self.ax2.plot([], [], 'g-', linewidth=2, label='RealEnergyOut')
+        # Energy bars will be created in update_plot
+        self.energy_bars_in = None
+        self.energy_bars_out = None
         
         # Configure axes
         self.setup_axes()
@@ -72,12 +72,12 @@ class LivePowerMonitor:
         self.ax1.grid(True, alpha=0.3)
         self.ax1.axhline(y=0, color='gray', linestyle='--', linewidth=0.8, alpha=0.7)
         
-        # Energy Overview Plot (bottom) - Energy counters
+        # Energy Overview Plot (bottom) - Energy per 15min
         self.ax2.set_xlabel('Time', fontsize=11)
-        self.ax2.set_ylabel('Energy (kWh)', fontsize=11)
-        self.ax2.set_title('Energy Counters', fontsize=12)
+        self.ax2.set_ylabel('Energy per 15min (kWh)', fontsize=11)
+        self.ax2.set_title('Energy Consumption - 15 Minute Intervals', fontsize=12)
         # Legend will be set when data is plotted
-        self.ax2.grid(True, alpha=0.3)
+        self.ax2.grid(True, alpha=0.3, axis='y')
         
     def read_data(self):
         """Read the latest data from CSV file."""
@@ -141,44 +141,79 @@ class LivePowerMonitor:
             self.ax1.text(0.5, 0.5, 'Waiting for data...\nMake sure readout-smart-meter.py is running',
                          ha='center', va='center', transform=self.ax1.transAxes,
                          fontsize=14, color='red')
-            return self.line_net, self.line_in, self.line_out, self.line_energy_in, self.line_energy_out
+            return []
         
         # Update Power Overview plot (top) - All 3 power values in one graph
         self.line_net.set_data(df['datetime'], df['real_power_net'])
         self.line_in.set_data(df['datetime'], df['real_power_in'])
         self.line_out.set_data(df['datetime'], df['real_power_out'])
         
-        # Update Energy Overview plot (bottom) - Energy counters in kWh
-        energy_in_kwh = df['real_energy_in'] / 1000
-        energy_out_kwh = df['real_energy_out'] / 1000
-        self.line_energy_in.set_data(df['datetime'], energy_in_kwh)
-        self.line_energy_out.set_data(df['datetime'], energy_out_kwh)
+        # Update Energy Overview plot (bottom) - Bar chart with 15-min intervals
+        # Clear previous bars
+        self.ax2.clear()
+        self.setup_axes()  # Re-setup ax2 labels/grid
+        
+        # Calculate energy per 15-minute interval
+        df_sorted = df.sort_values('datetime').copy()
+        df_sorted['energy_in_diff'] = df_sorted['real_energy_in'].diff()
+        df_sorted['energy_out_diff'] = df_sorted['real_energy_out'].diff()
+        
+        # Remove negative differences
+        df_sorted.loc[df_sorted['energy_in_diff'] < 0, 'energy_in_diff'] = 0
+        df_sorted.loc[df_sorted['energy_out_diff'] < 0, 'energy_out_diff'] = 0
+        
+        # Group by 15-minute intervals
+        df_sorted['time_15min'] = df_sorted['datetime'].dt.floor('15min')
+        energy_15min = df_sorted.groupby('time_15min').agg({
+            'energy_in_diff': 'sum',
+            'energy_out_diff': 'sum'
+        }).reset_index()
+        
+        # Convert Wh to kWh
+        energy_15min['energy_in_kwh'] = energy_15min['energy_in_diff'] / 1000
+        energy_15min['energy_out_kwh'] = energy_15min['energy_out_diff'] / 1000
+        
+        # Create bar chart
+        if not energy_15min.empty:
+            bar_width = 0.35
+            x = range(len(energy_15min))
+            
+            self.energy_bars_in = self.ax2.bar([i - bar_width/2 for i in x], 
+                                               energy_15min['energy_in_kwh'], 
+                                               bar_width, label='Energy In', 
+                                               color='red', alpha=0.7)
+            self.energy_bars_out = self.ax2.bar([i + bar_width/2 for i in x], 
+                                                energy_15min['energy_out_kwh'], 
+                                                bar_width, label='Energy Out', 
+                                                color='green', alpha=0.7)
+            
+            # Set x-axis labels
+            self.ax2.set_xticks(x)
+            labels = [t.strftime('%H:%M') for t in energy_15min['time_15min']]
+            self.ax2.set_xticklabels(labels, rotation=45, ha='right')
+            
+            # Show legend
+            self.ax2.legend(loc='upper left')
         
         # Adjust axes limits
         self.ax1.relim()
         self.ax1.autoscale_view()
-        self.ax2.relim()
-        self.ax2.autoscale_view()
         
         # Add legends (only if not already present)
         if not self.ax1.get_legend():
             self.ax1.legend(loc='upper left')
-        if not self.ax2.get_legend():
-            self.ax2.legend(loc='upper left')
         
         # Format x-axis to show time
         date_format = DateFormatter('%H:%M:%S')
         self.ax1.xaxis.set_major_formatter(date_format)
-        self.ax2.xaxis.set_major_formatter(date_format)
         
         # Rotate labels
         plt.setp(self.ax1.xaxis.get_majorticklabels(), rotation=45)
-        plt.setp(self.ax2.xaxis.get_majorticklabels(), rotation=45)
         
         # Update statistics
         self.update_statistics(df)
         
-        return self.line_net, self.line_in, self.line_out, self.line_energy_in, self.line_energy_out
+        return []
     
     def update_statistics(self, df):
         """Update the statistics text."""

@@ -307,6 +307,78 @@ def print_statistics(df, hours=24):
     
     print(f"{'='*60}\n")
 
+def plot_power_overview_interactive(df, hours=24):
+    """Interactive version of power overview plot."""
+    if df.empty:
+        print(f"No data available.")
+        return
+    
+    latest_time = df['datetime'].max()
+    cutoff_time = latest_time - timedelta(hours=hours)
+    df_filtered = df[df['datetime'] >= cutoff_time]
+    
+    if df_filtered.empty:
+        print(f"No data available for the last {hours} hours.")
+        return
+    
+    fig, ax = plt.subplots(figsize=(16, 8))
+    
+    ax.plot(df_filtered['datetime'], df_filtered['real_power_net'], 
+            label='RealPower (Net)', linewidth=2, color='blue')
+    ax.plot(df_filtered['datetime'], df_filtered['real_power_in'], 
+            label='RealPowerIn (Consumption)', linewidth=1.5, color='red', alpha=0.7)
+    ax.plot(df_filtered['datetime'], df_filtered['real_power_out'], 
+            label='RealPowerOut (Feed-in)', linewidth=1.5, color='green', alpha=0.7)
+    
+    ax.axhline(y=0, color='gray', linestyle='--', linewidth=0.8, alpha=0.7)
+    ax.set_xlabel('Time', fontsize=12)
+    ax.set_ylabel('Power (W)', fontsize=12)
+    ax.set_title(f'Power Overview - Last {hours} Hours (INTERACTIVE)', fontsize=14, fontweight='bold')
+    ax.legend(loc='upper left', fontsize=11)
+    ax.grid(True, alpha=0.3)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.show(block=False)
+
+def plot_energy_overview_interactive(df, hours=24):
+    """Interactive version of energy overview plot."""
+    if df.empty:
+        print(f"No data available.")
+        return
+    
+    latest_time = df['datetime'].max()
+    cutoff_time = latest_time - timedelta(hours=hours)
+    df_filtered = df[df['datetime'] >= cutoff_time]
+    
+    if df_filtered.empty:
+        print(f"No data available for the last {hours} hours.")
+        return
+    
+    if df_filtered['real_energy_in'].sum() == 0 and df_filtered['real_energy_out'].sum() == 0:
+        print("Warning: No energy data available.")
+        return
+    
+    fig, ax = plt.subplots(figsize=(16, 8))
+    
+    energy_in_kwh = df_filtered['real_energy_in'] / 1000
+    energy_out_kwh = df_filtered['real_energy_out'] / 1000
+    
+    ax.plot(df_filtered['datetime'], energy_in_kwh, 
+            label='RealEnergyIn (Consumed)', linewidth=2, color='red')
+    ax.plot(df_filtered['datetime'], energy_out_kwh, 
+            label='RealEnergyOut (Fed-in)', linewidth=2, color='green')
+    
+    ax.set_xlabel('Time', fontsize=12)
+    ax.set_ylabel('Energy (kWh)', fontsize=12)
+    ax.set_title(f'Energy Counters - Last {hours} Hours (INTERACTIVE)', fontsize=14, fontweight='bold')
+    ax.legend(loc='upper left', fontsize=11)
+    ax.grid(True, alpha=0.3)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.show()
+
 def main():
     """Main function to create all plots."""
     import argparse
@@ -316,6 +388,8 @@ def main():
                        help='Number of hours to plot (default: 24)')
     parser.add_argument('--file', type=str, default=DATA_FILE,
                        help=f'Path to CSV data file (default: {DATA_FILE})')
+    parser.add_argument('--interactive', '-i', action='store_true',
+                       help='Show interactive plot instead of saving to file (allows zoom/pan)')
     args = parser.parse_args()
     
     print("Smart Meter Power Data Visualization")
@@ -334,7 +408,21 @@ def main():
     print_statistics(df, hours=args.hours)
     
     # Create plots
-    print("\nGenerating plots...")
+    if args.interactive:
+        print("\nShowing interactive plots...")
+        print("\nINTERACTIVE CONTROLS:")
+        print("  🏠 Home button  - Reset view")
+        print("  ➕ Zoom button  - Click and drag to zoom")
+        print("  🖐️  Pan button   - Click and drag to pan")
+        print("  Mouse wheel    - Scroll Y-axis")
+        print("  Shift+wheel    - Zoom Y-axis")
+        print("  Ctrl+wheel     - Zoom X-axis")
+        print()
+        # Show interactive plots (don't close, don't save)
+        plot_power_overview_interactive(df, hours=args.hours)
+        plot_energy_overview_interactive(df, hours=args.hours)
+    else:
+        print("\nGenerating plots...")
     
     # Plot 1: Power overview (Net, In, Out)
     plot_power_overview(df, hours=args.hours)

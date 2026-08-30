@@ -70,18 +70,22 @@ Erstellt statische PNG-Grafiken aus gesammelten Daten.
 |-----------|-------------|----------|----------|
 | `--hours N` | Zeitraum in Stunden | 24 | `--hours 6` |
 | `--file FILE` | CSV-Datei | `power_data.csv` | `--file data.csv` |
+| `--interactive` oder `-i` | Interaktive Ansicht statt PNG | Aus | `-i` |
 
 ### Beispiele
 
 ```bash
-# Standard: Letzte 24 Stunden
+# Standard: Letzte 24 Stunden (PNG-Dateien)
 python3 plot_power_data.py
 
 # Letzte 6 Stunden
 python3 plot_power_data.py --hours 6
 
-# Letzte 2 Stunden
-python3 plot_power_data.py --hours 2
+# Interaktive Ansicht mit Zoom/Pan
+python3 plot_power_data.py --hours 6 --interactive
+
+# Kurz: Interaktiv
+python3 plot_power_data.py -i
 
 # Andere Datendatei
 python3 plot_power_data.py --file power_data_2024.csv
@@ -124,6 +128,12 @@ python3 live_monitor.py --hours 0.5 --interval 2000
 # Andere Datendatei
 python3 live_monitor.py --file backup_data.csv
 ```
+
+**Interaktive Steuerung:**
+- Mausrad: Y-Achse scrollen
+- Shift+Mausrad: Y-Achse zoomen
+- Ctrl+Mausrad: X-Achse (Zeit) zoomen
+- Toolbar: Pan, Zoom, Home Buttons
 
 ---
 

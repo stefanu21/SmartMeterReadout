@@ -68,6 +68,27 @@ Das Live-GUI zeigt:
 - ✓ Automatische Updates alle 5 Sekunden
 - ✓ Zeitachse mit Uhrzeiten
 
+### Interaktive Steuerung
+
+Die GUI ist vollständig interaktiv:
+
+**Toolbar-Buttons:**
+- 🏠 **Home** - Zurück zur Original-Ansicht
+- ⬅️ **Back** - Vorherige Ansicht
+- ➡️ **Forward** - Nächste Ansicht
+- ➕ **Zoom** - Rechteck aufziehen zum Zoomen
+- 🖐️ **Pan** - Klicken und ziehen zum Verschieben
+- 💾 **Save** - Aktuelle Ansicht als Bild speichern
+
+**Maus/Tastatur:**
+- **Mausrad** - Y-Achse scrollen (hoch/runter)
+- **Shift + Mausrad** - Y-Achse zoomen (rein/raus)
+- **Ctrl + Mausrad** - X-Achse zoomen (Zeit)
+- **Linke Maustaste** - Im Pan-Modus: Verschieben
+- **Rechte Maustaste** - Zoom-Rechteck aufziehen
+- **'g'** - Gitter ein/aus
+- **'l'** - Logarithmische Y-Achse ein/aus
+
 ## Beispiele
 
 ```bash

@@ -204,6 +204,10 @@ class LivePowerMonitor:
     
     def start(self, interval=UPDATE_INTERVAL):
         """Start the live monitor."""
+        # Enable interactive navigation toolbar
+        # This provides zoom, pan, and home buttons
+        from matplotlib.backend_bases import NavigationToolbar2
+        
         ani = animation.FuncAnimation(
             self.fig, 
             self.update_plot, 
@@ -211,8 +215,37 @@ class LivePowerMonitor:
             blit=False,
             cache_frame_data=False
         )
+        
+        # Enable interactive pan/zoom
+        # Left mouse: Pan
+        # Right mouse: Zoom rectangle
+        # Scroll wheel: Zoom in/out on Y-axis
+        # Toolbar buttons: Zoom, Pan, Home, Save
+        
         plt.tight_layout()
         plt.subplots_adjust(bottom=0.08)  # Make room for statistics
+        
+        # Show instructions
+        print("\n" + "="*70)
+        print("INTERACTIVE CONTROLS:")
+        print("="*70)
+        print("  Toolbar Buttons:")
+        print("    🏠 Home     - Reset view to original")
+        print("    ⬅️  Back     - Previous view")
+        print("    ➡️  Forward  - Next view")
+        print("    ➕ Zoom     - Click and drag to zoom into rectangle")
+        print("    🖐️  Pan      - Click and drag to move around")
+        print("    💾 Save     - Save current view as image")
+        print()
+        print("  Keyboard/Mouse:")
+        print("    Mouse Wheel  - Scroll Y-axis up/down")
+        print("    Shift+Wheel  - Zoom in/out on Y-axis")
+        print("    Ctrl+Wheel   - Zoom in/out on X-axis")
+        print("    'g'          - Toggle grid")
+        print("    'l'          - Toggle Y-axis log scale")
+        print("="*70)
+        print()
+        
         plt.show()
 
 def main():

@@ -5,6 +5,7 @@ Reads power_data.csv and creates various plots.
 """
 
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from datetime import datetime, timedelta
@@ -374,16 +375,35 @@ def plot_power_overview_interactive(df, hours=24):
     
     # Add interactive cursor if mplcursors is available
     if HAS_MPLCURSORS:
-        # Use hover=2 to snap to actual data points only (not interpolated values)
-        cursor = mplcursors.cursor(line_net + line_in + line_out, hover=mplcursors.HoverMode.Transient)
+        # Use hover=2 (Transient) to snap to nearest data point
+        # This shows tooltips when hovering near the line and snaps to actual measurements
+        cursor = mplcursors.cursor(line_net + line_in + line_out, hover=2)
+        
         @cursor.connect("add")
         def on_add(sel):
-            # sel.index gives us the index of the actual data point
-            index = sel.index
+            # Get the line data and target point
             line = sel.artist
-            
-            # Get the actual data point from the line
             xdata, ydata = line.get_data()
+            
+            # sel.target contains the (x, y) coordinates
+            x_target, y_target = sel.target
+            
+            # Find the nearest actual data point
+            # Convert x_target to index
+            if hasattr(sel, 'index') and sel.index is not None:
+                # If index is available, use it
+                index = int(sel.index) if not isinstance(sel.index, int) else sel.index
+            else:
+                # Find nearest point manually
+                import numpy as np
+                distances = np.abs(xdata - x_target)
+                index = np.argmin(distances)
+            
+            # Make sure index is valid
+            if index >= len(xdata):
+                index = len(xdata) - 1
+            
+            # Get the actual data point
             x_val = xdata[index]
             y_val = ydata[index]
             
@@ -393,6 +413,9 @@ def plot_power_overview_interactive(df, hours=24):
             # Set the annotation text with actual measured value
             sel.annotation.set_text(f'{time_str}\n{y_val:.1f} W')
             sel.annotation.get_bbox_patch().set(fc="white", alpha=0.9)
+            sel.annotation.arrow_patch.set(arrowstyle='->', lw=1.5)
+        
+        print("Info: Interactive cursor enabled - hover over curves to see values")
     else:
         print("Info: Install 'mplcursors' for interactive hover tooltips: pip install mplcursors")
     

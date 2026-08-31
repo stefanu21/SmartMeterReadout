@@ -1,5 +1,10 @@
 .idea
 
+# Editor swap/backup files
+*.swp
+*.swo
+*~
+
 # Python
 __pycache__/
 *.pyc

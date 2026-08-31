@@ -371,15 +371,39 @@ while not signalHandler.shutdown_requested():
         initVector = systemTitle + frameCounter  # --- 12 bytes
 
         frameLength1 = int(hex(data[1]), 16)  # FA --- 250 bytes
+        # Sanity-check frameLength1 before using it to index into the buffer.
+        # Corrupted/garbled frames (e.g. serial line noise) can produce bogus
+        # values here that would otherwise lead to nonsense slicing and a
+        # library-internal crash further down (gurux_dlms doesn't validate
+        # its input and can raise an unhelpful TypeError on malformed PDUs).
+        if not (0 < frameLength1 <= FRAME_LENGTH - 9):
+            log(f"Corrupt/invalid frame detected (frameLength1={frameLength1}). Skipping.", True)
+            continue
+
         frameLength2 = int(hex(data[frameLength1 + 7]), 16) # FA --- 38 Byte
+        if not (0 < frameLength2 <= FRAME_LENGTH - frameLength1 - 9):
+            log(f"Corrupt/invalid frame detected (frameLength2={frameLength2}). Skipping.", True)
+            continue
 
         payload1 = data[payload1StartPos:(6 + frameLength1 - 2)]  # 6: Start bytes (M-Bus Data link layer) 2: end character + checksum
         payload2 = data[6 + frameLength1 + payload2StartPos:(frameLength1 + 5 + 5 + frameLength2)]
 
         cypherText = payload1 + payload2
-        apdu = aesgcm.encrypt(initVector, cypherText, b"0").hex()
 
-        xml = translator.pduToXml(apdu)
+        # Decryption and PDU-to-XML translation are wrapped separately: a
+        # corrupted/garbled frame (occasional serial line noise) can cause
+        # AES-GCM auth failures or trip bugs in the gurux_dlms library
+        # (e.g. an unhandled TypeError on malformed input) - these are
+        # expected, recoverable, per-frame issues and should just be
+        # skipped, not counted towards the fatal "too many errors" shutdown
+        # further below.
+        try:
+            apdu = aesgcm.encrypt(initVector, cypherText, b"0").hex()
+            xml = translator.pduToXml(apdu)
+        except Exception as parse_err:
+            log(f"Corrupt/undecodable frame, skipping: {str(parse_err)}", True)
+            continue
+
         soup = BeautifulSoup(xml, "lxml")
 
         # -> Do not use Smart Meter's time as it's about 20 seconds behind (in my case)

@@ -426,7 +426,13 @@ while not signalHandler.shutdown_requested():
         # Safer approach which analyzes the OBIS codes and does not depend on the order of the values
         structure_element = soup.find("structure")
         if not structure_element:
-            log("Could not find structure element in XML. XML content: " + str(xml[:500]), True)
+            # This happens when decryption "succeeds" technically (no AES-GCM
+            # auth error) but the frame content was itself corrupt/garbled,
+            # so the translator produces a raw <Data> blob instead of a
+            # proper <Structure>. Recoverable - just skip this frame, same
+            # as the other corrupt-frame cases above (does not count towards
+            # the fatal "too many errors" shutdown).
+            log("Corrupt/undecodable frame (no structure element in XML), skipping. XML content: " + str(xml[:200]))
             continue
         
         elements = structure_element.find_all("structure", recursive=False)

@@ -32,7 +32,9 @@ FRAME1_START_BYTE = b"\x68"
 FRAME2_END_BYTE = b"\x16"
 # AES key format, e.g. 48E2C...
 # Default VNB_KEY - can be overridden via command line parameter
-VNB_KEY = "<YOUR KEY>"
+#VNB_KEY = "<YOUR_KEY>" # PV Anlage 
+VNB_KEY = "<YOUR_KEY>"  # Zähler OG
+
 LOG_FILE = os.path.realpath(os.path.join(os.path.dirname(__file__), os.path.basename(__file__)[:-2]+"log"))
 # LOG_FILE = ""  # if you don't want to log
 PRINT_LOGS = True

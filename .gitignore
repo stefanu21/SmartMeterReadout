@@ -30,3 +30,8 @@ power_data_backup.csv
 
 # Generated plots
 plots/
+
+# Runtime Tasmota device config (environment-specific IPs; managed via web UI).
+# A template is checked in as tasmota_devices.example.json instead.
+tasmota_devices.json
+archive/

@@ -179,14 +179,9 @@ parser.add_argument('--bezug-port', type=str, default=COM_PORT,
                         f'(default: {COM_PORT})')
 parser.add_argument('--gui', action='store_true', help='Start live GUI monitor in a separate window')
 parser.add_argument('--gui-hours', type=float, default=1, help='Hours to display in GUI (default: 1)')
-parser.add_argument('--tasmota', action='store_true',
-                   help='Start Tasmota smart-plug monitor in the background (see tasmota_monitor.py)')
-parser.add_argument('--tasmota-devices', type=str,
-                   help='Comma-separated Name=IP list of Tasmota devices to poll, '
-                        'e.g. "Kueche=192.168.100.3,Keller=192.168.100.4" '
-                        '(default: built-in config in tasmota_monitor.py)')
 parser.add_argument('--tasmota-interval', type=float, default=5,
-                   help='Seconds between Tasmota poll cycles (default: 5)')
+                   help='Seconds between Tasmota poll cycles (default: 5). Devices to poll are '
+                        'managed via the web UI and stored in tasmota_devices.json.')
 parser.add_argument('--web', action='store_true',
                    help='Start web-based live monitor in the background (see web_monitor.py). '
                         'Alternative to --gui for headless servers / remote viewing.')
@@ -215,6 +210,7 @@ parser.add_argument('--second-data-file', type=str, default=None,
                    help='Output CSV for the second meter (default: power_data_2.csv next to the script)')
 parser.add_argument('--second-label', type=str, default='Zähler 2',
                    help='Display label for the second meter in the web UI (default: "Zähler 2")')
+parser.add_argument('--secondary', action='store_true', help=argparse.SUPPRESS)
 args = parser.parse_args()
 
 # Override output CSV path (used e.g. for the spawned second-meter instance).
@@ -299,23 +295,27 @@ if args.gui:
         except Exception as e:
             log(f"Failed to start GUI monitor: {str(e)}", True)
 
-# Start Tasmota smart-plug monitor if requested
+# Start the Tasmota smart-plug monitor. It always runs (independent of any
+# flag): the devices to poll are managed at runtime from the web UI and stored
+# in tasmota_devices.json, which the monitor re-reads every poll cycle. With an
+# empty config it simply idles. It is skipped in a spawned second-meter reader
+# (--secondary), so only the primary instance runs a single monitor.
 tasmota_process = None
-if args.tasmota:
+if not args.secondary:
     try:
         script_dir = os.path.dirname(os.path.abspath(__file__))
         tasmota_script = os.path.join(script_dir, "tasmota_monitor.py")
 
         if os.path.exists(tasmota_script):
             tasmota_data_file = os.path.join(script_dir, "tasmota_power.csv")
+            tasmota_config_file = os.path.join(script_dir, "tasmota_devices.json")
             tasmota_cmd = [
                 sys.executable,
                 tasmota_script,
                 '--interval', str(args.tasmota_interval),
                 '--file', tasmota_data_file,
+                '--config', tasmota_config_file,
             ]
-            if args.tasmota_devices:
-                tasmota_cmd += ['--devices', args.tasmota_devices]
             log("Starting Tasmota smart-plug monitor...")
             tasmota_process = subprocess.Popen(tasmota_cmd)
             log(f"Tasmota monitor started with PID {tasmota_process.pid}")
@@ -344,8 +344,7 @@ if args.web:
             ]
             if SECOND_ENABLED:
                 web_cmd += ['--file2', SECOND_DATA_FILE, '--label2', args.second_label]
-            if args.tasmota_devices:
-                web_cmd += ['--tasmota-devices', args.tasmota_devices]
+            web_cmd += ['--tasmota-config', os.path.join(script_dir, "tasmota_devices.json")]
             log(f"Starting web monitor on http://{args.web_host}:{args.web_port}/ ...")
             web_process = subprocess.Popen(web_cmd)
             log(f"Web monitor started with PID {web_process.pid}")
@@ -371,6 +370,7 @@ if SECOND_ENABLED:
             '--key', second_key,
             '--data-file', SECOND_DATA_FILE,
             '--log-interval', str(LOGGING_INTERVAL),
+            '--secondary',
         ]
         log(f"Starting feed-in meter reader on {args.einspeise_port} -> {SECOND_DATA_FILE} ...")
         second_process = subprocess.Popen(second_cmd)

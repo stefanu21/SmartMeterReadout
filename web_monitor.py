@@ -36,6 +36,8 @@ from flask import Flask, jsonify, render_template, request
 # Reuse the existing, well-tested data loading/parsing logic instead of
 # duplicating it.
 from plot_power_data import load_data, load_tasmota_data, TASMOTA_COLOR_PALETTE
+import tasmota_config
+from tasmota_monitor import poll_device as tasmota_poll_device
 
 # Configuration
 DATA_FILE = "power_data.csv"
@@ -61,8 +63,8 @@ app.config["REFRESH_MS"] = REFRESH_MS
 app.config["DATA_FILE2"] = None
 app.config["LABEL"] = "Zähler 1"
 app.config["LABEL2"] = "Zähler 2"
-# Optional device-name -> IP map for Tasmota plugs (shown as legend tooltips)
-app.config["TASMOTA_IPS"] = {}
+# JSON config file holding the Tasmota devices to poll (managed via the UI).
+app.config["TASMOTA_CONFIG"] = tasmota_config.default_config_path(BASE_DIR)
 
 
 def _series(df, x_col, y_col):
@@ -226,7 +228,9 @@ def api_data():
             str(device): TASMOTA_COLOR_PALETTE[i % len(TASMOTA_COLOR_PALETTE)]
             for i, device in enumerate(tasmota_pivot.columns)
         }
-        ip_map = app.config.get("TASMOTA_IPS") or {}
+        ip_map = tasmota_config.devices_as_ip_map(
+            tasmota_config.load_devices(app.config["TASMOTA_CONFIG"])
+        )
         payload["tasmota_ips"] = {
             str(device): ip_map.get(str(device), "")
             for device in tasmota_pivot.columns
@@ -282,6 +286,77 @@ def api_archives():
     return jsonify({"archives": entries})
 
 
+@app.route("/api/tasmota/devices", methods=["GET"])
+def api_tasmota_devices():
+    """Return the list of configured Tasmota devices."""
+    devices = tasmota_config.load_devices(app.config["TASMOTA_CONFIG"])
+    return jsonify({"devices": devices})
+
+
+@app.route("/api/tasmota/devices", methods=["POST"])
+def api_tasmota_add():
+    """Add a Tasmota device to the config. Body: {"name": ..., "ip": ...}.
+    The device is test-polled first; it is only stored if it responds with
+    valid ENERGY data, to catch typos in the IP/name."""
+    body = request.get_json(silent=True) or {}
+    name = body.get("name")
+    ip = body.get("ip")
+    try:
+        name = tasmota_config.validate_name(name)
+        ip = tasmota_config.validate_ip(ip)
+    except tasmota_config.DeviceConfigError as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
+
+    # Reachability / validity check before persisting.
+    if tasmota_poll_device(name, ip) is None:
+        return jsonify({
+            "status": "error",
+            "message": f"Device '{name}' at {ip} did not return valid power data "
+                       f"(check IP and that it is a power-monitoring Tasmota plug).",
+        }), 400
+
+    try:
+        devices = tasmota_config.add_device(app.config["TASMOTA_CONFIG"], name, ip)
+    except tasmota_config.DeviceConfigError as e:
+        return jsonify({"status": "error", "message": str(e)}), 409
+
+    return jsonify({"status": "ok", "devices": devices}), 201
+
+
+@app.route("/api/tasmota/devices/<name>", methods=["PATCH"])
+def api_tasmota_rename(name):
+    """Rename a Tasmota device. Body: {"name": <new name>}. Only affects live
+    polling/legend going forward; rows already recorded keep the old column
+    name in the CSV until the next archive."""
+    body = request.get_json(silent=True) or {}
+    new_name = body.get("name")
+    try:
+        new_name = tasmota_config.validate_name(new_name)
+    except tasmota_config.DeviceConfigError as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
+
+    try:
+        devices = tasmota_config.rename_device(
+            app.config["TASMOTA_CONFIG"], name, new_name
+        )
+    except tasmota_config.DeviceConfigError as e:
+        # "No device named" -> 404, "already exists" -> 409.
+        code = 404 if str(e).startswith("No device named") else 409
+        return jsonify({"status": "error", "message": str(e)}), code
+    return jsonify({"status": "ok", "devices": devices})
+
+
+@app.route("/api/tasmota/devices/<name>", methods=["DELETE"])
+def api_tasmota_remove(name):
+    """Remove a Tasmota device from the config. Only affects live polling;
+    already-recorded data stays in the CSV until the next archive."""
+    try:
+        devices = tasmota_config.remove_device(app.config["TASMOTA_CONFIG"], name)
+    except tasmota_config.DeviceConfigError as e:
+        return jsonify({"status": "error", "message": str(e)}), 404
+    return jsonify({"status": "ok", "devices": devices})
+
+
 @app.route("/health")
 def health():
     return jsonify({"status": "ok"})
@@ -309,9 +384,9 @@ def main():
                        help='Display label for the first meter (default: "Zähler 1")')
     parser.add_argument('--label2', type=str, default='Zähler 2',
                        help='Display label for the second meter (default: "Zähler 2")')
-    parser.add_argument('--tasmota-devices', type=str, default=None,
-                       help='Comma-separated Name=IP list of Tasmota devices, used to '
-                            'show the IP as a legend tooltip (e.g. "Boiler=192.168.100.3").')
+    parser.add_argument('--tasmota-config', type=str, default=None,
+                       help='Path to the JSON Tasmota device config file (managed via the web UI). '
+                            f'Default: {tasmota_config.DEFAULT_CONFIG_FILENAME} next to this script.')
     args = parser.parse_args()
 
     app.config["DATA_FILE"] = os.path.join(BASE_DIR, args.file) if not os.path.isabs(args.file) else args.file
@@ -320,14 +395,9 @@ def main():
     app.config["REFRESH_MS"] = args.refresh
     app.config["LABEL"] = args.label
     app.config["LABEL2"] = args.label2
-    if args.tasmota_devices:
-        ip_map = {}
-        for entry in args.tasmota_devices.split(","):
-            entry = entry.strip()
-            if "=" in entry:
-                name, ip = entry.split("=", 1)
-                ip_map[name.strip()] = ip.strip()
-        app.config["TASMOTA_IPS"] = ip_map
+    if args.tasmota_config:
+        app.config["TASMOTA_CONFIG"] = (os.path.join(BASE_DIR, args.tasmota_config)
+                                        if not os.path.isabs(args.tasmota_config) else args.tasmota_config)
     if args.file2:
         app.config["DATA_FILE2"] = os.path.join(BASE_DIR, args.file2) if not os.path.isabs(args.file2) else args.file2
 

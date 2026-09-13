@@ -111,6 +111,66 @@
     font-family: monospace;
     font-size: 0.9em;
   }
+  #tasmota-panel {
+    margin: 4px 0 8px 0;
+    font-size: 0.9em;
+  }
+  #tasmota-panel > summary {
+    cursor: pointer;
+    padding: 4px 0;
+    color: #9cdcfe;
+    user-select: none;
+  }
+  #tasmota-manager {
+    padding: 8px 0 2px 0;
+  }
+  #tasmota-add {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  #tasmota-add input {
+    background: #2d2d2d;
+    color: #ddd;
+    border: 1px solid #555;
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 0.9em;
+  }
+  #tasmota-status {
+    font-family: monospace;
+    font-size: 0.85em;
+  }
+  #tasmota-status.ok { color: #7ec699; }
+  #tasmota-status.err { color: #e06c75; }
+  #tasmota-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  #tasmota-list li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #2a2a2a;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 4px 8px;
+  }
+  #tasmota-list .dev-ip {
+    color: #888;
+    font-family: monospace;
+    font-size: 0.85em;
+  }
+  #tasmota-list button {
+    padding: 2px 8px;
+    font-size: 0.8em;
+  }
   /* Smartphone / narrow-screen tweaks */
   @media (max-width: 640px) {
     body { padding: 0 8px 8px 8px; }
@@ -125,6 +185,8 @@
       font-size: 0.85em;
       flex: 1 1 auto;
     }
+    #tasmota-add { flex-direction: column; align-items: stretch; }
+    #tasmota-add input { width: 100%; box-sizing: border-box; }
     #fullscreen-btn {
       flex: 0 0 auto;
       padding: 8px 12px;
@@ -148,6 +210,18 @@
     <button id="archive-reload-btn">Liste aktualisieren</button>
     <span id="archive-status"></span>
   </div>
+  <details id="tasmota-panel">
+    <summary>Tasmota-Geräte verwalten</summary>
+    <div id="tasmota-manager">
+      <div id="tasmota-add">
+        <input type="text" id="tasmota-name" placeholder="Name (z.B. Boiler)" autocomplete="off">
+        <input type="text" id="tasmota-ip" placeholder="IP / Hostname (z.B. 192.168.100.3)" autocomplete="off">
+        <button id="tasmota-add-btn">Hinzufügen</button>
+        <span id="tasmota-status"></span>
+      </div>
+      <ul id="tasmota-list"></ul>
+    </div>
+  </details>
   <div id="power-chart"></div>
   <div id="energy-chart"></div>
 
@@ -259,13 +333,6 @@
       ];
 
       const deviceNames = Object.keys(data.tasmota || {});
-      let newDevicesAdded = false;
-      deviceNames.forEach((name) => {
-        if (!(name in tasmotaTraceIndex)) {
-          tasmotaTraceIndex[name] = traces.length + (powerInitialized ? 0 : 0);
-          newDevicesAdded = true;
-        }
-      });
 
       if (!powerInitialized) {
         // Insert the second meter's traces (if present) right after meter 1,
@@ -327,9 +394,10 @@
       Plotly.update(powerDiv, { x: updateX, y: updateY }, {}, indices);
 
       // Add any brand-new devices as new traces (rare - only when a device
-      // is first seen).
+      // is first seen). Assign the trace index at add-time so it always matches
+      // the real position in powerDiv.data (never the local net/in/out array).
       deviceNames.forEach((name) => {
-        if (tasmotaTraceIndex[name] >= powerDiv.data.length) {
+        if (!(name in tasmotaTraceIndex)) {
           const series = data.tasmota[name];
           const color = (data.tasmota_colors || {})[name] || '#a855f7';
           // Ensure the right-hand Tasmota axis exists before attaching a trace
@@ -338,6 +406,7 @@
           if (!powerDiv.layout || !powerDiv.layout.yaxis2) {
             Plotly.relayout(powerDiv, { yaxis2: tasmotaAxisLayout() });
           }
+          tasmotaTraceIndex[name] = powerDiv.data.length;
           Plotly.addTraces(powerDiv, {
             x: series.x, y: series.y, name: name, yaxis: 'y2',
             mode: 'lines', line: { color: color, width: 1.5 },
@@ -551,6 +620,126 @@
       }
     });
 
+    // --- Tasmota device management ---------------------------------------
+    const tasmotaListEl = document.getElementById('tasmota-list');
+    const tasmotaNameEl = document.getElementById('tasmota-name');
+    const tasmotaIpEl = document.getElementById('tasmota-ip');
+    const tasmotaStatusEl = document.getElementById('tasmota-status');
+
+    function setTasmotaStatus(msg, kind) {
+      tasmotaStatusEl.textContent = msg || '';
+      tasmotaStatusEl.className = kind || '';
+    }
+
+    function renderTasmotaList(devices) {
+      tasmotaListEl.innerHTML = '';
+      (devices || []).forEach(dev => {
+        const li = document.createElement('li');
+        const label = document.createElement('span');
+        label.textContent = dev.name;
+        const ip = document.createElement('span');
+        ip.className = 'dev-ip';
+        ip.textContent = dev.ip;
+        const renameBtn = document.createElement('button');
+        renameBtn.textContent = 'Umbenennen';
+        renameBtn.addEventListener('click', () => renameTasmotaDevice(dev.name));
+        const btn = document.createElement('button');
+        btn.textContent = 'Entfernen';
+        btn.addEventListener('click', () => removeTasmotaDevice(dev.name));
+        li.appendChild(label);
+        li.appendChild(ip);
+        li.appendChild(renameBtn);
+        li.appendChild(btn);
+        tasmotaListEl.appendChild(li);
+      });
+    }
+
+    async function loadTasmotaDevices() {
+      try {
+        const resp = await fetch('/api/tasmota/devices');
+        const body = await resp.json();
+        renderTasmotaList(body.devices || []);
+      } catch (err) {
+        /* ignore list errors */
+      }
+    }
+
+    async function addTasmotaDevice() {
+      const name = tasmotaNameEl.value.trim();
+      const ip = tasmotaIpEl.value.trim();
+      if (!name || !ip) {
+        setTasmotaStatus('Name und IP angeben.', 'err');
+        return;
+      }
+      setTasmotaStatus('Prüfe Erreichbarkeit ...', '');
+      try {
+        const resp = await fetch('/api/tasmota/devices', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, ip }),
+        });
+        const body = await resp.json().catch(() => ({}));
+        if (!resp.ok || body.status !== 'ok') {
+          throw new Error(body.message || `HTTP ${resp.status}`);
+        }
+        setTasmotaStatus(`'${name}' hinzugefügt.`, 'ok');
+        tasmotaNameEl.value = '';
+        tasmotaIpEl.value = '';
+        renderTasmotaList(body.devices || []);
+        refresh();
+      } catch (err) {
+        setTasmotaStatus('Fehler: ' + err.message, 'err');
+      }
+    }
+
+    async function renameTasmotaDevice(oldName) {
+      const newName = (prompt(`Neuer Name für '${oldName}':`, oldName) || '').trim();
+      if (!newName || newName === oldName) {
+        return;
+      }
+      try {
+        const resp = await fetch('/api/tasmota/devices/' + encodeURIComponent(oldName), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: newName }),
+        });
+        const body = await resp.json().catch(() => ({}));
+        if (!resp.ok || body.status !== 'ok') {
+          throw new Error(body.message || `HTTP ${resp.status}`);
+        }
+        setTasmotaStatus(`'${oldName}' in '${newName}' umbenannt.`, 'ok');
+        renderTasmotaList(body.devices || []);
+        refresh();
+      } catch (err) {
+        setTasmotaStatus('Fehler: ' + err.message, 'err');
+      }
+    }
+
+    async function removeTasmotaDevice(name) {
+      if (!confirm(`Gerät '${name}' entfernen? Es wird nicht mehr abgefragt; bereits ` +
+                   `gespeicherte Live-Daten bleiben bis zur nächsten Archivierung erhalten.`)) {
+        return;
+      }
+      try {
+        const resp = await fetch('/api/tasmota/devices/' + encodeURIComponent(name), {
+          method: 'DELETE',
+        });
+        const body = await resp.json().catch(() => ({}));
+        if (!resp.ok || body.status !== 'ok') {
+          throw new Error(body.message || `HTTP ${resp.status}`);
+        }
+        setTasmotaStatus(`'${name}' entfernt.`, 'ok');
+        renderTasmotaList(body.devices || []);
+        refresh();
+      } catch (err) {
+        setTasmotaStatus('Fehler: ' + err.message, 'err');
+      }
+    }
+
+    document.getElementById('tasmota-add-btn').addEventListener('click', addTasmotaDevice);
+    tasmotaIpEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') addTasmotaDevice(); });
+
+    loadTasmotaDevices();
     loadArchiveList();
     refresh();
     setInterval(() => { if (!currentArchive) refresh(); }, REFRESH_MS);

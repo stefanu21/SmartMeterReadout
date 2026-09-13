@@ -158,9 +158,13 @@ Features:
 * **Second meter** – read the feed-in meter with
   `--einspeise-port/--second-key/--second-data-file/--second-label`; it runs as an
   isolated subprocess and is shown alongside the consumption meter.
-* **Tasmota smart plugs** – `--tasmota --tasmota-devices "Name=IP,..."` polls
-  Tasmota plugs; their power is plotted on a separate right-hand y-axis and the
-  device IP is shown as a legend tooltip on hover.
+* **Tasmota smart plugs** – Tasmota plugs are managed directly in the web UI
+  ("Tasmota-Geräte verwalten": add/remove by name + IP). The device list is
+  stored in `tasmota_devices.json` and polled by a background monitor that
+  re-reads it every cycle, so changes take effect live without a restart. Their
+  power is plotted on a separate right-hand y-axis and the device IP is shown as
+  a legend tooltip on hover. Adding/removing only affects the live measurement;
+  already-archived snapshots stay unchanged.
 * **Measurement archiving** – a button archives the current CSV files into a
   timestamped `archive/<stamp>/` folder and starts a fresh measurement; an
   archive selector lets you browse stored snapshots.

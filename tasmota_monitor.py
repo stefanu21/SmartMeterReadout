@@ -21,6 +21,10 @@ Polls one or more Tasmota smart plugs over HTTP (Status 10 command) and logs
 their power/energy readings to a CSV file, in the same style as
 readout-smart-meter.py, so the data can be displayed alongside the smart
 meter power curves in live_monitor.py / plot_power_data.py.
+
+The list of devices to poll is read from a JSON config file (managed from the
+web UI, see tasmota_config.py) and re-read on every poll cycle, so devices can
+be added/removed at runtime without restarting this process.
 """
 
 import os
@@ -35,13 +39,9 @@ import urllib.error
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 
-# -- CONFIGURATION BEGIN -- #
+import tasmota_config
 
-# Tasmota devices to poll: friendly name -> IP address (or hostname).
-# Can be overridden/extended via --devices "Name1=IP1,Name2=IP2"
-TASMOTA_DEVICES = {
-    "Geraet1": "192.168.100.3",
-}
+# -- CONFIGURATION BEGIN -- #
 
 POLL_INTERVAL = 5       # Seconds between poll cycles (matches smart meter cadence)
 REQUEST_TIMEOUT = 3     # Seconds per HTTP request, per device
@@ -51,6 +51,7 @@ LOG_FILE = os.path.realpath(os.path.join(os.path.dirname(__file__), os.path.base
 PRINT_LOGS = True
 
 DATA_FILE = os.path.realpath(os.path.join(os.path.dirname(__file__), "tasmota_power.csv"))
+CONFIG_FILE = tasmota_config.default_config_path(os.path.dirname(os.path.abspath(__file__)))
 ENABLE_DATA_LOGGING = True
 
 CSV_HEADER = "timestamp,datetime,device,power,voltage,current,energy_today,energy_yesterday,energy_total\n"
@@ -113,25 +114,6 @@ class SignalHandler:
         return self._shutdown
 
 
-def parse_devices(devices_arg):
-    """Parse a 'Name1=IP1,Name2=IP2' string into a dict. Returns the default
-    TASMOTA_DEVICES dict if devices_arg is None/empty."""
-    if not devices_arg:
-        return dict(TASMOTA_DEVICES)
-
-    devices = {}
-    for entry in devices_arg.split(","):
-        entry = entry.strip()
-        if not entry:
-            continue
-        if "=" not in entry:
-            log(f"Ignoring invalid device entry (expected Name=IP): '{entry}'", True)
-            continue
-        name, ip = entry.split("=", 1)
-        devices[name.strip()] = ip.strip()
-    return devices
-
-
 def _as_scalar(value):
     """Tasmota can report Power/Voltage/Current as a single number or, for
     multi-channel devices, as a list of numbers (one per channel). Sum lists
@@ -181,13 +163,12 @@ def poll_device(name, ip):
 
 
 def main():
-    global DATA_FILE, POLL_INTERVAL
+    global DATA_FILE, CONFIG_FILE, POLL_INTERVAL
 
     parser = argparse.ArgumentParser(description='Tasmota Smart Plug Power Monitor')
-    parser.add_argument('--devices', type=str,
-                         help='Comma-separated list of Name=IP devices to poll, '
-                              'e.g. "Kueche=192.168.100.3,Keller=192.168.100.4" '
-                              '(default: built-in TASMOTA_DEVICES config)')
+    parser.add_argument('--config', type=str, default=CONFIG_FILE,
+                         help=f'Path to the JSON device config file, managed from the web UI '
+                              f'(default: {CONFIG_FILE})')
     parser.add_argument('--interval', type=float, default=POLL_INTERVAL,
                          help=f'Seconds between poll cycles (default: {POLL_INTERVAL})')
     parser.add_argument('--file', type=str, default=DATA_FILE,
@@ -197,12 +178,8 @@ def main():
     args = parser.parse_args()
 
     DATA_FILE = os.path.realpath(args.file)
+    CONFIG_FILE = os.path.realpath(args.config)
     POLL_INTERVAL = args.interval
-    devices = parse_devices(args.devices)
-
-    if not devices:
-        log("No Tasmota devices configured. Use --devices or edit TASMOTA_DEVICES.", True)
-        sys.exit(1)
 
     if args.clear_data:
         if os.path.exists(DATA_FILE):
@@ -224,35 +201,53 @@ def main():
             sys.exit(1)
 
     log("Start " + os.path.basename(__file__))
-    log(f"Polling {len(devices)} Tasmota device(s) every {POLL_INTERVAL}s: "
-        + ", ".join(f"{n} ({ip})" for n, ip in devices.items()))
+    log(f"Reading device config from: {CONFIG_FILE}")
     log(f"Logging to: {DATA_FILE}")
 
     signalHandler = SignalHandler()
 
-    with ThreadPoolExecutor(max_workers=max(1, len(devices))) as executor:
+    # The device list is re-read from the config file every cycle so devices
+    # added/removed via the web UI take effect without a restart. We keep a
+    # persistent (over-provisioned) thread pool and log the list whenever it
+    # changes, so the log stays readable.
+    last_devices = None
+
+    with ThreadPoolExecutor(max_workers=16) as executor:
         while not signalHandler.shutdown_requested():
             cycle_start = time.time()
             timestamp = int(cycle_start)
 
-            try:
-                results = executor.map(lambda item: poll_device(*item), devices.items())
-                for result in results:
-                    if result is None:
-                        continue
-                    log_tasmota_data(
-                        timestamp,
-                        result["name"],
-                        result["power"],
-                        result["voltage"],
-                        result["current"],
-                        result["energy_today"],
-                        result["energy_yesterday"],
-                        result["energy_total"],
-                    )
-            except Exception as e:
-                log(str(e), True)
-                log(traceback.format_exc(), True)
+            devices = tasmota_config.devices_as_ip_map(
+                tasmota_config.load_devices(CONFIG_FILE)
+            )
+
+            if devices != last_devices:
+                if devices:
+                    log(f"Polling {len(devices)} Tasmota device(s): "
+                        + ", ".join(f"{n} ({ip})" for n, ip in devices.items()))
+                else:
+                    log("No Tasmota devices configured - idling (add devices via the web UI).")
+                last_devices = dict(devices)
+
+            if devices:
+                try:
+                    results = executor.map(lambda item: poll_device(*item), list(devices.items()))
+                    for result in results:
+                        if result is None:
+                            continue
+                        log_tasmota_data(
+                            timestamp,
+                            result["name"],
+                            result["power"],
+                            result["voltage"],
+                            result["current"],
+                            result["energy_today"],
+                            result["energy_yesterday"],
+                            result["energy_total"],
+                        )
+                except Exception as e:
+                    log(str(e), True)
+                    log(traceback.format_exc(), True)
 
             elapsed = time.time() - cycle_start
             remaining = POLL_INTERVAL - elapsed

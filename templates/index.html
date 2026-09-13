@@ -521,7 +521,6 @@
         renderStats(data.stats);
         renderStats2(data.stats2);
         applyLegendTooltips(data.tasmota_ips || {});
-        resetView();
       } catch (err) {
         errorBanner.style.display = 'block';
         errorBanner.textContent = 'Fehler beim Laden der Daten: ' + err.message;

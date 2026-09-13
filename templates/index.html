@@ -173,18 +173,24 @@
     let powerInitialized = false;
     let energyInitialized = false;
 
-    function basePowerLayout() {
+    // Layout for the right-hand Tasmota axis. Only added when at least one
+    // Tasmota device is actually present, so the chart works fine without any
+    // Tasmota smart plug (no empty "Tasmota (W)" axis is shown).
+    function tasmotaAxisLayout() {
       return {
+        title: 'Tasmota (W)', overlaying: 'y', side: 'right',
+        showgrid: false, rangemode: 'tozero',
+      };
+    }
+
+    function basePowerLayout(hasTasmota) {
+      const layout = {
         paper_bgcolor: '#1e1e1e',
         plot_bgcolor: '#1e1e1e',
         font: { color: '#ddd' },
         margin: { t: 20, r: 20, l: 60, b: 40 },
         xaxis: { type: 'date', gridcolor: '#333' },
         yaxis: { title: 'Verbrauch / Einspeisung (W)', gridcolor: '#333', rangemode: 'tozero' },
-        yaxis2: {
-          title: 'Tasmota (W)', overlaying: 'y', side: 'right',
-          showgrid: false, rangemode: 'tozero',
-        },
         hovermode: 'closest',
         legend: { orientation: 'h', y: 1.12 },
         shapes: [{
@@ -192,6 +198,10 @@
           line: { color: '#888', dash: 'dash', width: 1 }
         }],
       };
+      if (hasTasmota) {
+        layout.yaxis2 = tasmotaAxisLayout();
+      }
+      return layout;
     }
 
     function baseEnergyLayout() {
@@ -275,7 +285,7 @@
           });
         });
 
-        const layout = basePowerLayout();
+        const layout = basePowerLayout(deviceNames.length > 0);
         const lastX = data.power.net.x.length ? data.power.net.x[data.power.net.x.length - 1] : null;
         if (lastX) {
           const end = new Date(lastX);
@@ -322,6 +332,12 @@
         if (tasmotaTraceIndex[name] >= powerDiv.data.length) {
           const series = data.tasmota[name];
           const color = (data.tasmota_colors || {})[name] || '#a855f7';
+          // Ensure the right-hand Tasmota axis exists before attaching a trace
+          // to it (it is omitted from the initial layout when no device was
+          // present at first render).
+          if (!powerDiv.layout || !powerDiv.layout.yaxis2) {
+            Plotly.relayout(powerDiv, { yaxis2: tasmotaAxisLayout() });
+          }
           Plotly.addTraces(powerDiv, {
             x: series.x, y: series.y, name: name, yaxis: 'y2',
             mode: 'lines', line: { color: color, width: 1.5 },
@@ -483,7 +499,11 @@
 
     function resetView() {
       if (powerInitialized) {
-        Plotly.relayout(powerDiv, { 'xaxis.autorange': true, 'yaxis.autorange': true, 'yaxis2.autorange': true });
+        const relayout = { 'xaxis.autorange': true, 'yaxis.autorange': true };
+        if (powerDiv.layout && powerDiv.layout.yaxis2) {
+          relayout['yaxis2.autorange'] = true;
+        }
+        Plotly.relayout(powerDiv, relayout);
       }
       if (energyInitialized) {
         Plotly.relayout(energyDiv, { 'xaxis.autorange': true, 'yaxis.autorange': true });

@@ -376,6 +376,14 @@ However, it is not clear when this will be available.
 * https://oesterreichsenergie.at/smart-meter/technische-leitfaeden
 
 
+## Authors
+
+* Stefan Ursella (maintainer)
+* Matthias
+
+See the git history for the full list of contributors.
+
+
 ## Credits
 
 Thanks to @greenMikeEU, @micronano0 and @tirolerstefan and all the others for their preceding work.

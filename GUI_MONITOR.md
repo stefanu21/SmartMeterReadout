@@ -48,7 +48,7 @@ python3 demo_gui.py
 --log-interval N   Logge jede N-te Messung (Standard: 1)
 --clear-data       Löscht alte Daten und startet neu (erstellt Backup)
 --key KEY          AES-Schlüssel für Entschlüsselung
---port PORT        Serieller Port (Standard: /dev/ttyUSB0)
+--bezug-port PORT  Serieller Port des Bezugszählers (Standard: /dev/ttyUSB0)
 ```
 
 ### live_monitor.py

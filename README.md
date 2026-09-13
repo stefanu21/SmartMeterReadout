@@ -155,9 +155,9 @@ Features:
 
 * **Live power & energy charts** – consumption (Verbrauch) and feed-in
   (Einspeisung) as the main curves, plus a 15-minute energy bar chart.
-* **Second meter** – read a second serial meter with
-  `--second-port/--second-key/--second-data-file/--second-label`; it runs as an
-  isolated subprocess and is shown alongside the first meter.
+* **Second meter** – read the feed-in meter with
+  `--einspeise-port/--second-key/--second-data-file/--second-label`; it runs as an
+  isolated subprocess and is shown alongside the consumption meter.
 * **Tasmota smart plugs** – `--tasmota --tasmota-devices "Name=IP,..."` polls
   Tasmota plugs; their power is plotted on a separate right-hand y-axis and the
   device IP is shown as a legend tooltip on hover.
@@ -170,7 +170,7 @@ Features:
 Example (single meter + web UI):
 
 ```bash
-python3 readout-smart-meter.py --key <YOUR KEY> --port /dev/ttyUSB0 --web
+python3 readout-smart-meter.py --key <YOUR KEY> --bezug-port /dev/bezug_zaehler --web
 ```
 
 See `SERVER_USAGE.md` and `CLI_PARAMETERS.md` for the full list of options.

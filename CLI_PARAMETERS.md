@@ -8,7 +8,8 @@ Hauptskript zum Auslesen des Smart Meters und Datenerfassung.
 
 | Parameter | Beschreibung | Standard | Beispiel |
 |-----------|-------------|----------|----------|
-| `--port PORT` | Serieller Port | `/dev/ttyUSB0` | `--port /dev/ttyUSB1` |
+| `--bezug-port PORT` | Serieller Port des Bezugszählers | `/dev/ttyUSB0` | `--bezug-port /dev/bezug_zaehler` |
+| `--einspeise-port PORT` | Serieller Port des Einspeisezählers (optional, 2. Zähler) | – | `--einspeise-port /dev/einspeise_zaehler` |
 | `--key KEY` | AES-Entschlüsselungsschlüssel | Aus Config | `--key 48E2C...` |
 
 ### Datenerfassung
@@ -52,7 +53,7 @@ python3 readout-smart-meter.py --gui --gui-hours 2
 python3 readout-smart-meter.py --log-interval 60 --gui
 
 # Anderer Port mit eigenem Schlüssel
-python3 readout-smart-meter.py --port /dev/ttyUSB1 --key 48E2C...
+python3 readout-smart-meter.py --bezug-port /dev/ttyUSB1 --key 48E2C...
 
 # Komplett: Neu starten, 1-min Intervall, GUI
 python3 readout-smart-meter.py --clear-data --log-interval 12 --gui --gui-hours 3

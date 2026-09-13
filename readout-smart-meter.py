@@ -174,7 +174,9 @@ class SignalHandler:
 # Parse command line arguments
 parser = argparse.ArgumentParser(description='Smart Meter Readout - DLMS/COSEM Protocol')
 parser.add_argument('--key', type=str, help='AES decryption key (VNB_KEY) in hex format, e.g., 48E2C...')
-parser.add_argument('--port', type=str, default=COM_PORT, help=f'Serial port (default: {COM_PORT})')
+parser.add_argument('--bezug-port', type=str, default=COM_PORT,
+                   help=f'Serial port of the consumption meter ("Bezug", e.g. /dev/bezug_zaehler) '
+                        f'(default: {COM_PORT})')
 parser.add_argument('--gui', action='store_true', help='Start live GUI monitor in a separate window')
 parser.add_argument('--gui-hours', type=float, default=1, help='Hours to display in GUI (default: 1)')
 parser.add_argument('--tasmota', action='store_true',
@@ -202,10 +204,11 @@ parser.add_argument('--data-file', type=str, default=None,
                         'Used to give a second meter instance its own data file.')
 parser.add_argument('--label', type=str, default='Zähler 1',
                    help='Display label for this meter in the web UI (default: "Zähler 1")')
-parser.add_argument('--second-port', type=str, default=None,
-                   help='Optional second serial port (e.g. /dev/zaehler_in). If given, a second '
-                        'reader for that port is started as a background subprocess and its data '
-                        'is shown alongside the first meter in the web UI.')
+parser.add_argument('--einspeise-port', type=str, default=None,
+                   help='Optional serial port of the feed-in meter ("Einspeisung", e.g. '
+                        '/dev/einspeise_zaehler). If given, a second reader for that port is '
+                        'started as a background subprocess and its data is shown alongside the '
+                        'consumption meter in the web UI.')
 parser.add_argument('--second-key', type=str, default=None,
                    help='AES key for the second meter (default: same as --key)')
 parser.add_argument('--second-data-file', type=str, default=None,
@@ -221,7 +224,7 @@ if args.data_file:
                  else os.path.realpath(os.path.join(os.path.dirname(__file__), args.data_file)))
 
 # Resolve second-meter configuration (optional).
-SECOND_ENABLED = bool(args.second_port)
+SECOND_ENABLED = bool(args.einspeise_port)
 if SECOND_ENABLED:
     if args.second_data_file:
         SECOND_DATA_FILE = (os.path.realpath(args.second_data_file) if os.path.isabs(args.second_data_file)
@@ -257,12 +260,12 @@ if args.clear_data:
 if args.key:
     VNB_KEY = args.key
     log(f"Using VNB_KEY from command line parameter")
-if args.port:
-    COM_PORT = args.port
+if args.bezug_port:
+    COM_PORT = args.bezug_port
 if args.log_interval:
     LOGGING_INTERVAL = args.log_interval
     log(f"Logging interval set to every {LOGGING_INTERVAL} measurement(s) (~{LOGGING_INTERVAL * 5} seconds)")
-    COM_PORT = args.port
+    COM_PORT = args.bezug_port
 
 log("Start " + os.path.basename(__file__))
 log(f"Using serial port: {COM_PORT}")
@@ -351,10 +354,11 @@ if args.web:
     except Exception as e:
         log(f"Failed to start web monitor: {str(e)}", True)
 
-# Start a second meter reader on a different serial port if requested. We
-# simply re-run THIS very script as a subprocess in plain single-port mode
-# (no --web/--gui/--second-port), so all the decoding/logging logic is shared
-# and each meter stays fully isolated in its own process + CSV file.
+# Start a second meter reader (the feed-in / "Einspeisung" meter) on a
+# different serial port if requested. We simply re-run THIS very script as a
+# subprocess in plain single-port mode (no --web/--gui/--einspeise-port), so all
+# the decoding/logging logic is shared and each meter stays fully isolated in
+# its own process + CSV file.
 second_process = None
 if SECOND_ENABLED:
     try:
@@ -363,12 +367,12 @@ if SECOND_ENABLED:
         second_cmd = [
             sys.executable,
             script_path,
-            '--port', args.second_port,
+            '--bezug-port', args.einspeise_port,
             '--key', second_key,
             '--data-file', SECOND_DATA_FILE,
             '--log-interval', str(LOGGING_INTERVAL),
         ]
-        log(f"Starting second meter reader on {args.second_port} -> {SECOND_DATA_FILE} ...")
+        log(f"Starting feed-in meter reader on {args.einspeise_port} -> {SECOND_DATA_FILE} ...")
         second_process = subprocess.Popen(second_cmd)
         log(f"Second meter reader started with PID {second_process.pid}")
     except Exception as e:

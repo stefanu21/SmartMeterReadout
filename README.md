@@ -144,6 +144,38 @@ ReactiveEnergyOut: 808.028 kvar
 ```
 
 
+## Web dashboard (live monitor)
+
+`web_monitor.py` serves an interactive browser dashboard (Plotly.js) as a
+headless alternative to the matplotlib GUI, reachable from any device on the
+LAN. It is started automatically when `readout-smart-meter.py` is run with
+`--web`.
+
+Features:
+
+* **Live power & energy charts** – consumption (Verbrauch) and feed-in
+  (Einspeisung) as the main curves, plus a 15-minute energy bar chart.
+* **Second meter** – read a second serial meter with
+  `--second-port/--second-key/--second-data-file/--second-label`; it runs as an
+  isolated subprocess and is shown alongside the first meter.
+* **Tasmota smart plugs** – `--tasmota --tasmota-devices "Name=IP,..."` polls
+  Tasmota plugs; their power is plotted on a separate right-hand y-axis and the
+  device IP is shown as a legend tooltip on hover.
+* **Measurement archiving** – a button archives the current CSV files into a
+  timestamped `archive/<stamp>/` folder and starts a fresh measurement; an
+  archive selector lets you browse stored snapshots.
+* **Fullscreen & mobile** – a fullscreen toggle scales the charts to fill the
+  screen, and the layout is responsive for smartphones.
+
+Example (single meter + web UI):
+
+```bash
+python3 readout-smart-meter.py --key <YOUR KEY> --port /dev/ttyUSB0 --web
+```
+
+See `SERVER_USAGE.md` and `CLI_PARAMETERS.md` for the full list of options.
+
+
 ## Example message from Smart Meter
 
 ### In HEX:
@@ -359,4 +391,20 @@ Thanks to @greenMikeEU, @micronano0 and @tirolerstefan and all the others for th
 
 ## License
 
-This project is licensed under GNU GPLv3+.
+Copyright (C) 2023-2026 the SmartMeterReadout authors and contributors.
+
+This project builds on preceding work by others (see the **Credits** section and
+the linked similar projects above); those parts remain under the copyright of
+their respective authors.
+
+This project is free software: you can redistribute it and/or modify it under
+the terms of the **GNU General Public License version 3 or later (GPLv3+)** as
+published by the Free Software Foundation.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+The full license text is provided in the [LICENSE](LICENSE) file, and each
+source file carries a GPLv3+ header notice. If you did not receive a copy of the
+license, see <https://www.gnu.org/licenses/>.

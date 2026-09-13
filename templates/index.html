@@ -227,7 +227,6 @@
 
   <script>
     const REFRESH_MS = {{ refresh_ms }};
-    const DISPLAY_HOURS = {{ display_hours }};
     const LABEL1 = {{ label1 | tojson }};
     const LABEL2 = {{ label2 | tojson }};
 
@@ -353,12 +352,8 @@
         });
 
         const layout = basePowerLayout(deviceNames.length > 0);
-        const lastX = data.power.net.x.length ? data.power.net.x[data.power.net.x.length - 1] : null;
-        if (lastX) {
-          const end = new Date(lastX);
-          const start = new Date(end.getTime() - DISPLAY_HOURS * 3600 * 1000);
-          layout.xaxis.range = [start.toISOString(), end.toISOString()];
-        }
+        // Leave the x-axis on autorange so a page reload shows the same view as
+        // the "Reset view" button (the full loaded history).
         Plotly.newPlot(powerDiv, traces, layout, { responsive: true, scrollZoom: true });
         powerInitialized = true;
         return;

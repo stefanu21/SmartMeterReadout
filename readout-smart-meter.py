@@ -180,7 +180,39 @@ parser.add_argument('--log-interval', type=int, default=LOGGING_INTERVAL,
                         f'Smart meter sends ~every 5 sec. Examples: 1=5sec, 12=1min, 60=5min')
 parser.add_argument('--clear-data', action='store_true',
                    help='Delete old data and start fresh (creates backup as power_data.csv.backup)')
+parser.add_argument('--data-file', type=str, default=None,
+                   help='Override output CSV path (default: power_data.csv next to the script). '
+                        'Used to give a second meter instance its own data file.')
+parser.add_argument('--label', type=str, default='Zähler 1',
+                   help='Display label for this meter in the web UI (default: "Zähler 1")')
+parser.add_argument('--second-port', type=str, default=None,
+                   help='Optional second serial port (e.g. /dev/zaehler_in). If given, a second '
+                        'reader for that port is started as a background subprocess and its data '
+                        'is shown alongside the first meter in the web UI.')
+parser.add_argument('--second-key', type=str, default=None,
+                   help='AES key for the second meter (default: same as --key)')
+parser.add_argument('--second-data-file', type=str, default=None,
+                   help='Output CSV for the second meter (default: power_data_2.csv next to the script)')
+parser.add_argument('--second-label', type=str, default='Zähler 2',
+                   help='Display label for the second meter in the web UI (default: "Zähler 2")')
 args = parser.parse_args()
+
+# Override output CSV path (used e.g. for the spawned second-meter instance).
+# Must happen before --clear-data handling below, which operates on DATA_FILE.
+if args.data_file:
+    DATA_FILE = (os.path.realpath(args.data_file) if os.path.isabs(args.data_file)
+                 else os.path.realpath(os.path.join(os.path.dirname(__file__), args.data_file)))
+
+# Resolve second-meter configuration (optional).
+SECOND_ENABLED = bool(args.second_port)
+if SECOND_ENABLED:
+    if args.second_data_file:
+        SECOND_DATA_FILE = (os.path.realpath(args.second_data_file) if os.path.isabs(args.second_data_file)
+                            else os.path.realpath(os.path.join(os.path.dirname(__file__), args.second_data_file)))
+    else:
+        SECOND_DATA_FILE = os.path.realpath(os.path.join(os.path.dirname(__file__), "power_data_2.csv"))
+else:
+    SECOND_DATA_FILE = None
 
 # Handle --clear-data option
 if args.clear_data:
@@ -287,8 +319,13 @@ if args.web:
                 '--port', str(args.web_port),
                 '--hours', str(args.gui_hours),
                 '--file', DATA_FILE,
+                '--label', args.label,
                 '--tasmota-file', os.path.join(script_dir, "tasmota_power.csv"),
             ]
+            if SECOND_ENABLED:
+                web_cmd += ['--file2', SECOND_DATA_FILE, '--label2', args.second_label]
+            if args.tasmota_devices:
+                web_cmd += ['--tasmota-devices', args.tasmota_devices]
             log(f"Starting web monitor on http://{args.web_host}:{args.web_port}/ ...")
             web_process = subprocess.Popen(web_cmd)
             log(f"Web monitor started with PID {web_process.pid}")
@@ -296,6 +333,29 @@ if args.web:
             log(f"Warning: Web monitor script not found at {web_script}", True)
     except Exception as e:
         log(f"Failed to start web monitor: {str(e)}", True)
+
+# Start a second meter reader on a different serial port if requested. We
+# simply re-run THIS very script as a subprocess in plain single-port mode
+# (no --web/--gui/--second-port), so all the decoding/logging logic is shared
+# and each meter stays fully isolated in its own process + CSV file.
+second_process = None
+if SECOND_ENABLED:
+    try:
+        script_path = os.path.abspath(__file__)
+        second_key = args.second_key if args.second_key else VNB_KEY
+        second_cmd = [
+            sys.executable,
+            script_path,
+            '--port', args.second_port,
+            '--key', second_key,
+            '--data-file', SECOND_DATA_FILE,
+            '--log-interval', str(LOGGING_INTERVAL),
+        ]
+        log(f"Starting second meter reader on {args.second_port} -> {SECOND_DATA_FILE} ...")
+        second_process = subprocess.Popen(second_cmd)
+        log(f"Second meter reader started with PID {second_process.pid}")
+    except Exception as e:
+        log(f"Failed to start second meter reader: {str(e)}", True)
 
 signalHandler = SignalHandler()
 
@@ -564,5 +624,22 @@ if web_process is not None:
             log(f"Error stopping web monitor: {str(e)}", True)
             try:
                 web_process.kill()
+            except:
+                pass
+
+# Cleanup second meter reader process if it was started
+if second_process is not None:
+    if second_process.poll() is not None:
+        log("Second meter reader already stopped")
+    else:
+        try:
+            log("Stopping second meter reader...")
+            second_process.terminate()
+            second_process.wait(timeout=5)
+            log("Second meter reader stopped")
+        except Exception as e:
+            log(f"Error stopping second meter reader: {str(e)}", True)
+            try:
+                second_process.kill()
             except:
                 pass
